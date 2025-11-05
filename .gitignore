@@ -1,0 +1,21 @@
+# Binaries
+bin/
+*.exe
+
+# Go test and coverage
+*.test
+*.out
+
+# Environment files
+configs/api.env
+
+# IDE files
+.vscode/
+.idea/
+
+# Logs
+*.log
+
+# OS files
+.DS_Store
+Thumbs.db

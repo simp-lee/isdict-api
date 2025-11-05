@@ -1,0 +1,1834 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>易思词典 - 六大权威数据源整合的进阶英语词典</title>
+
+    <!-- Tailwind CSS -->
+    <script src="/static/js/tailwindcss.min.js"></script>
+
+    <!-- Alpine.js -->
+    <script defer src="/static/js/alpine.min.js"></script>
+
+    <style>
+        [x-cloak] { display: none !important; }
+        .highlight { color: #dc2626; font-weight: 500; }
+        
+        /* 音标专用字体 */
+        .ipa-text {
+            font-family: "Segoe UI", "Noto Sans", "Lucida Sans Unicode", "Doulos SIL", "Charis SIL", serif;
+            font-size: 0.95em;
+            letter-spacing: 0.02em;
+        }
+        
+        /* 词性标签样式 */
+        .pos-badge {
+            display: inline-flex;
+            align-items: center;
+            background-color: #f8fafc;
+            color: #475569;
+            font-weight: 600;
+            font-size: 0.8rem;
+            letter-spacing: 0.05em;
+            padding: 0.25rem 0.75rem;
+            border-radius: 0.4rem;
+        }
+        
+        /* 发音标签样式 */
+        .pronunciation-badge {
+            background-color: #f1f5f9;
+            border: 1px solid #e2e8f0;
+            border-radius: 0.5rem;
+            padding: 0.375rem 0.75rem;
+            font-size: 0.875rem;
+        }
+        
+        /* 级别标签通用样式 */
+        .level-badge {
+            border-radius: 0.375rem;
+            padding: 0.25rem 0.625rem;
+            font-size: 0.75rem;
+            font-weight: 600;
+        }
+
+        .definition-entry {
+            background-color: #fff;
+            border-radius: 0.5rem;
+            padding-top: 1rem;
+            padding-bottom: 1rem;
+            transition: border-left-color 0.2s ease, box-shadow 0.2s ease, background-color 0.2s ease;
+        }
+
+        /* 仅在中等及以上屏幕显示左侧竖条 */
+        @media (min-width: 768px) {
+            .definition-entry {
+                border-left: 2px solid #e2e8f0;
+            }
+            
+            .definition-entry:hover {
+                border-left-color: #d7e3ff;
+            }
+        }
+
+        .definition-entry:hover {
+            background-color: #f9fafb;
+            box-shadow: 0 8px 18px rgba(15, 23, 42, 0.05);
+        }
+    </style>
+</head>
+<body class="bg-slate-100 min-h-screen text-slate-800 antialiased" x-data="dictionaryApp()" x-init="init()">
+    <header class="bg-white" :class="hasSearched ? 'sticky top-0 z-50 border-b border-slate-200 shadow-sm' : ''">
+        <div class="max-w-5xl mx-auto px-3 sm:px-4 md:px-6 lg:px-8">
+            <div class="flex flex-col items-center gap-6 py-16" x-show="!hasSearched" x-transition>
+                <button class="flex flex-col items-center text-center transition hover:opacity-80" @click="resetToHome()">
+                    <span class="text-4xl font-semibold text-red-600">易思词典</span>
+                    <span class="mt-1 text-sm text-slate-400">isdict.com</span>
+                    <span class="mt-2 text-sm text-slate-500">六大数据源 · 多维标注 · 智能检索</span>
+                </button>
+                <div class="relative w-full max-w-2xl rounded-3xl border border-slate-200/80 bg-white px-6 py-5 shadow-lg shadow-slate-200/60" x-data="{ focused: false }">
+                    <div class="flex items-center gap-4">
+                        <input
+                            type="text"
+                            class="w-full border-0 bg-transparent text-lg placeholder:text-slate-400 focus:outline-none focus:ring-0"
+                            :placeholder="window.innerWidth < 640 ? '搜索单词/短语/变体' : '搜索 71.5万 词条 · 支持单词/短语/变体查询'"
+                            x-model="searchQuery"
+                            @input="onSearchInput()"
+                            @focus="focused = true; showSuggestions = true"
+                            @blur="setTimeout(() => { focused = false; showSuggestions = false; }, 150)"
+                            @keydown.enter.prevent="performSearch()"
+                            @keydown.escape="showSuggestions = false"
+                        />
+                        <button
+                            class="flex h-12 w-12 flex-shrink-0 items-center justify-center rounded-full bg-red-500 text-white transition hover:bg-red-600"
+                            @mousedown.prevent
+                            @click="performSearch()"
+                            aria-label="搜索"
+                        >
+                            <svg class="h-5 w-5" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6">
+                                <circle cx="9" cy="9" r="5.5"></circle>
+                                <path d="M13 13l4 4" stroke-linecap="round"></path>
+                            </svg>
+                        </button>
+                    </div>
+                    <div
+                        x-show="showSuggestions && suggestions.length > 0"
+                        x-cloak
+                        class="absolute left-0 right-0 top-full z-20 mt-3 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-xl"
+                    >
+                        <template x-for="item in suggestions" :key="item.headword">
+                            <button
+                                class="w-full px-5 py-3 text-left text-sm transition hover:bg-rose-50 focus:bg-rose-50"
+                                @mousedown.prevent="selectSuggestion(item.headword)"
+                            >
+                                <div class="flex items-start justify-between gap-4">
+                                    <div class="flex-1">
+                                        <div class="flex items-baseline gap-2">
+                                            <p class="font-semibold text-slate-800" x-text="item.headword"></p>
+                                            <span x-show="item.headword.includes(' ')" class="inline-flex items-center rounded-full bg-teal-100 px-2 py-0.5 text-[10px] font-medium text-teal-700">短语</span>
+                                        </div>
+                                        <p class="mt-1 text-xs text-slate-500" x-show="item.translation_zh" x-text="formatTranslation(item.translation_zh)"></p>
+                                    </div>
+                                    <div class="flex flex-col items-end gap-1 text-xs text-slate-500">
+                                        <span x-show="item.cefr_level > 0" :class="getCEFRBadgeClass(item.cefr_level)" class="rounded-full px-2 py-0.5 font-medium" x-text="getCEFRLevelText(item.cefr_level)"></span>
+                                        <span x-show="item.frequency_rank > 0 && item.frequency_rank <= 5000" class="rounded-full bg-slate-100 px-2 py-0.5">TOP<span x-text="item.frequency_rank"></span></span>
+                                    </div>
+                                </div>
+                            </button>
+                        </template>
+                    </div>
+                </div>
+                <div class="flex flex-wrap justify-center gap-2" x-show="!currentWord && !loading">
+                    <template x-for="item in [...exampleWords, ...examplePhrases]" :key="item">
+                        <button
+                            class="rounded-md border border-slate-200 bg-white px-3 py-1.5 text-sm text-slate-600 transition hover:bg-slate-100"
+                            @click="searchQuery = item; performSearch()"
+                            x-text="item"
+                        ></button>
+                    </template>
+                </div>
+            </div>
+
+            <div class="border-b border-slate-200 bg-white" x-show="hasSearched" x-transition>
+                <div class="flex items-center gap-2 sm:gap-4 py-3">
+                    <button class="flex items-baseline gap-1 sm:gap-2 text-left transition hover:opacity-80 flex-shrink-0" @click="resetToHome()">
+                        <span class="text-lg sm:text-xl font-semibold text-red-600">易思词典</span>
+                        <span class="hidden md:inline text-sm text-slate-500">六大数据源整合词典</span>
+                    </button>
+                    <div class="relative flex-1" x-data="{ focused: false }">
+                        <input
+                            type="text"
+                            class="w-full border-0 border-b border-slate-300 bg-transparent py-2 pr-11 text-lg placeholder:text-slate-400 focus:border-red-500 focus:outline-none focus:ring-0 transition"
+                            placeholder="搜索单词或短语"
+                            x-model="searchQuery"
+                            @input="onSearchInput()"
+                            @focus="focused = true; showSuggestions = true"
+                            @blur="setTimeout(() => { focused = false; showSuggestions = false; }, 150)"
+                            @keydown.enter.prevent="performSearch()"
+                            @keydown.escape="showSuggestions = false"
+                        />
+                        <button
+                            class="absolute inset-y-0 right-0 flex items-center justify-center rounded-md px-2 text-slate-400 transition hover:text-red-600"
+                            @mousedown.prevent
+                            @click="performSearch()"
+                            aria-label="搜索"
+                        >
+                            <svg class="h-5 w-5" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6">
+                                <circle cx="9" cy="9" r="5.5"></circle>
+                                <path d="M13 13l4 4" stroke-linecap="round"></path>
+                            </svg>
+                        </button>
+
+                        <div
+                            x-show="showSuggestions && suggestions.length > 0"
+                            x-cloak
+                            class="absolute left-0 right-0 top-full z-20 mt-2 max-h-80 overflow-y-auto rounded-xl border border-slate-200 bg-white shadow-lg"
+                        >
+                            <template x-for="item in suggestions" :key="item.headword">
+                                <button
+                                    class="w-full px-4 py-3 text-left text-sm transition hover:bg-rose-50 focus:bg-rose-50"
+                                    @mousedown.prevent="selectSuggestion(item.headword)"
+                                >
+                                    <div class="flex items-start justify-between gap-3">
+                                        <div class="flex-1">
+                                            <div class="flex items-baseline gap-2">
+                                                <p class="font-semibold text-slate-800" x-text="item.headword"></p>
+                                                <span x-show="item.headword.includes(' ')" class="inline-flex items-center rounded-full bg-teal-100 px-2 py-0.5 text-[10px] font-medium text-teal-700">短语</span>
+                                            </div>
+                                            <p class="mt-1 text-xs text-slate-500" x-show="item.translation_zh" x-text="formatTranslation(item.translation_zh)"></p>
+                                        </div>
+                                        <div class="flex flex-col items-end gap-1 text-xs text-slate-500">
+                                            <span x-show="item.cefr_level > 0" :class="getCEFRBadgeClass(item.cefr_level)" class="rounded-full px-2 py-0.5 font-medium" x-text="getCEFRLevelText(item.cefr_level)"></span>
+                                            <span x-show="item.frequency_rank > 0 && item.frequency_rank <= 5000" class="rounded-full bg-slate-100 px-2 py-0.5">TOP<span x-text="item.frequency_rank"></span></span>
+                                        </div>
+                                    </div>
+                                </button>
+                            </template>
+                        </div>
+                    </div>
+                    <span class="hidden lg:block rounded-full border border-slate-200 px-3 py-1 text-[11px] tracking-wide text-slate-500">API Base · /api/v1</span>
+                </div>
+            </div>
+        </div>
+    </header>
+
+    <main class="max-w-5xl mx-auto px-3 sm:px-4 md:px-6 lg:px-8" :class="hasSearched ? 'pt-3 space-y-6' : 'pt-16 pb-16 space-y-10'">
+        <section x-show="!hasSearched" x-transition class="rounded-3xl border border-slate-200 bg-white px-4 sm:px-6 md:px-8 py-8 sm:py-10 shadow-sm">
+            <div class="space-y-4">
+                <p class="text-xs font-semibold tracking-[0.4em] text-red-500">核心特色</p>
+                <h2 class="text-2xl font-semibold text-slate-900">专为进阶学习打造的智能词典</h2>
+                <p class="text-sm leading-relaxed text-slate-500">整合 Wiktionary、Oxford、CEFR-J、CET、ECDICT、FrequencyWords 六大数据源，提供多维度标注与智能检索，构建精准的英语学习知识底座。</p>
+            </div>
+            <div class="mt-8 grid gap-6 md:grid-cols-2">
+                <article class="group rounded-2xl border border-slate-100 bg-gradient-to-br from-slate-50 to-white px-4 sm:px-5 md:px-6 py-4 sm:py-5 transition hover:border-red-200 hover:shadow-md">
+                    <div class="flex items-start gap-3">
+                        <div class="rounded-lg bg-red-100 p-2 text-red-600">
+                            <svg class="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
+                            </svg>
+                        </div>
+                        <div class="flex-1">
+                            <h3 class="text-lg font-semibold text-slate-900">权威数据整合</h3>
+                            <p class="mt-2 text-sm leading-relaxed text-slate-600">整合 Wiktionary（71.5万词条）、Oxford 3000/5000、CEFR-J、四六级、ECDICT（26万中文翻译）、FrequencyWords（5万词频）等资源，实现深度语料覆盖。</p>
+                        </div>
+                    </div>
+                </article>
+                <article class="group rounded-2xl border border-slate-100 bg-gradient-to-br from-slate-50 to-white px-4 sm:px-5 md:px-6 py-4 sm:py-5 transition hover:border-yellow-200 hover:shadow-md">
+                    <div class="flex items-start gap-3">
+                        <div class="rounded-lg bg-yellow-100 p-2 text-yellow-600">
+                            <svg class="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"/>
+                            </svg>
+                        </div>
+                        <div class="flex-1">
+                            <h3 class="text-lg font-semibold text-slate-900">多维等级标注</h3>
+                            <p class="mt-2 text-sm leading-relaxed text-slate-600">CEFR（A1-C2）9,301词、CET 四六级 5,414词、Oxford 核心 5,917词、柯林斯星级、词频 TOP 50K，为不同学习阶段提供精准定位。</p>
+                        </div>
+                    </div>
+                </article>
+                <article class="group rounded-2xl border border-slate-100 bg-gradient-to-br from-slate-50 to-white px-4 sm:px-5 md:px-6 py-4 sm:py-5 transition hover:border-blue-200 hover:shadow-md">
+                    <div class="flex items-start gap-3">
+                        <div class="rounded-lg bg-blue-100 p-2 text-blue-600">
+                            <svg class="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.536 8.464a5 5 0 010 7.072m2.828-9.9a9 9 0 010 12.728M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15z"/>
+                            </svg>
+                        </div>
+                        <div class="flex-1">
+                            <h3 class="text-lg font-semibold text-slate-900">多国发音音标</h3>
+                            <p class="mt-2 text-sm leading-relaxed text-slate-600">涵盖英式、美式、澳式、加拿大、新西兰、爱尔兰、苏格兰、印度、南非等 10 种口音的 IPA 音标，16万+ 发音数据。</p>
+                        </div>
+                    </div>
+                </article>
+                <article class="group rounded-2xl border border-slate-100 bg-gradient-to-br from-slate-50 to-white px-4 sm:px-5 md:px-6 py-4 sm:py-5 transition hover:border-green-200 hover:shadow-md">
+                    <div class="flex items-start gap-3">
+                        <div class="rounded-lg bg-green-100 p-2 text-green-600">
+                            <svg class="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/>
+                            </svg>
+                        </div>
+                        <div class="flex-1">
+                            <h3 class="text-lg font-semibold text-slate-900">智能搜索引擎</h3>
+                            <p class="mt-2 text-sm leading-relaxed text-slate-600">支持前缀自动补全、短语智能匹配、词形变体反查（88.8万变体），可将 gave→give、runnings→running 等变体还原。</p>
+                        </div>
+                    </div>
+                </article>
+                <article class="group rounded-2xl border border-slate-100 bg-gradient-to-br from-slate-50 to-white px-4 sm:px-5 md:px-6 py-4 sm:py-5 transition hover:border-purple-200 hover:shadow-md">
+                    <div class="flex items-start gap-3">
+                        <div class="rounded-lg bg-purple-100 p-2 text-purple-600">
+                            <svg class="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 5h12M9 3v2m1.048 9.5A18.022 18.022 0 016.412 9m6.088 9h7M11 21l5-10 5 10M12.751 5C11.783 10.77 8.07 15.61 3 18.129"/>
+                            </svg>
+                        </div>
+                        <div class="flex-1">
+                            <h3 class="text-lg font-semibold text-slate-900">双语释义例句</h3>
+                            <p class="mt-2 text-sm leading-relaxed text-slate-600">97.6万英文义项 + 26万中文翻译，58.4万真实例句中英对照，通过语境深度理解词汇用法。</p>
+                        </div>
+                    </div>
+                </article>
+                <article class="group rounded-2xl border border-slate-100 bg-gradient-to-br from-slate-50 to-white px-4 sm:px-5 md:px-6 py-4 sm:py-5 transition hover:border-teal-200 hover:shadow-md">
+                    <div class="flex items-start gap-3">
+                        <div class="rounded-lg bg-teal-100 p-2 text-teal-600">
+                            <svg class="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4"/>
+                            </svg>
+                        </div>
+                        <div class="flex-1">
+                            <h3 class="text-lg font-semibold text-slate-900">开放 API 接口</h3>
+                            <p class="mt-2 text-sm leading-relaxed text-slate-600">提供完整 RESTful API（9个端点），支持单词、批量、短语、搜索、补全等查询，可轻松集成至各类应用。</p>
+                        </div>
+                    </div>
+                </article>
+            </div>
+        </section>
+
+        <section x-show="!hasSearched" class="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+            <div class="rounded-2xl border border-slate-200 bg-gradient-to-br from-white to-slate-50 px-4 sm:px-5 md:px-6 py-4 sm:py-5 text-center shadow-sm transition hover:shadow-md">
+                <p class="text-3xl font-bold bg-gradient-to-r from-red-600 to-red-500 bg-clip-text text-transparent">715K+</p>
+                <p class="mt-2 text-xs uppercase tracking-widest text-slate-400">词条覆盖</p>
+                <p class="mt-1 text-[10px] text-slate-500">Wiktionary 权威数据</p>
+            </div>
+            <div class="rounded-2xl border border-slate-200 bg-gradient-to-br from-white to-blue-50 px-4 sm:px-5 md:px-6 py-4 sm:py-5 text-center shadow-sm transition hover:shadow-md">
+                <p class="text-3xl font-bold bg-gradient-to-r from-blue-600 to-blue-500 bg-clip-text text-transparent">10</p>
+                <p class="mt-2 text-xs uppercase tracking-widest text-slate-400">口音 IPA</p>
+                <p class="mt-1 text-[10px] text-slate-500">英美澳加新等多国音标</p>
+            </div>
+            <div class="rounded-2xl border border-slate-200 bg-gradient-to-br from-white to-yellow-50 px-4 sm:px-5 md:px-6 py-4 sm:py-5 text-center shadow-sm transition hover:shadow-md">
+                <p class="text-3xl font-bold bg-gradient-to-r from-yellow-600 to-yellow-500 bg-clip-text text-transparent">24.6K</p>
+                <p class="mt-2 text-xs uppercase tracking-widest text-slate-400">等级标注</p>
+                <p class="mt-1 text-[10px] text-slate-500">CEFR + CET + Oxford</p>
+            </div>
+            <div class="rounded-2xl border border-slate-200 bg-gradient-to-br from-white to-green-50 px-4 sm:px-5 md:px-6 py-4 sm:py-5 text-center shadow-sm transition hover:shadow-md">
+                <p class="text-3xl font-bold bg-gradient-to-r from-green-600 to-green-500 bg-clip-text text-transparent">584K+</p>
+                <p class="mt-2 text-xs uppercase tracking-widest text-slate-400">双语例句</p>
+                <p class="mt-1 text-[10px] text-slate-500">中英对照语境学习</p>
+            </div>
+        </section>
+
+        <section x-show="loading" x-cloak class="rounded-2xl border border-slate-200 bg-white px-4 sm:px-6 md:px-7 py-6 sm:py-8 shadow-sm">
+            <div class="space-y-4 animate-pulse">
+                <div class="h-6 w-1/3 rounded-full bg-slate-200/70"></div>
+                <div class="h-4 w-1/2 rounded-full bg-slate-200/60"></div>
+                <div class="h-4 w-2/3 rounded-full bg-slate-200/60"></div>
+                <div class="h-32 rounded-2xl bg-slate-200/60"></div>
+            </div>
+        </section>
+
+        <section x-show="error && !loading" x-cloak class="rounded-2xl border border-rose-200 bg-rose-50 px-4 sm:px-6 md:px-7 py-6 sm:py-8 text-rose-700 shadow-sm">
+            <div class="flex flex-col items-center text-center">
+                <svg class="h-12 w-12 text-rose-300" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                </svg>
+                <h3 class="mt-3 text-lg font-semibold">未找到单词</h3>
+                <p class="mt-2 text-sm text-rose-500" x-text="error"></p>
+                <div x-show="searchResults.length" class="mt-6 w-full">
+                    <p class="text-sm text-rose-500/80">也许你想找:</p>
+                    <div class="mt-3 flex flex-wrap justify-center gap-2">
+                        <template x-for="result in searchResults.slice(0, 5)" :key="result.headword">
+                            <button
+                                class="rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm text-slate-600 transition hover:border-rose-300 hover:bg-rose-50 hover:text-red-600"
+                                @click="selectSuggestion(result.headword)"
+                                x-text="result.headword"
+                            ></button>
+                        </template>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <section x-show="currentWord && !loading && !error" x-cloak class="space-y-8 rounded-2xl border border-slate-200 bg-white px-4 sm:px-6 md:px-8 py-6 sm:py-8 md:py-9 shadow-sm">
+            <header class="space-y-4 sm:space-y-6">
+                <div class="flex flex-col gap-3 sm:gap-4 md:flex-row md:items-start md:justify-between">
+                    <div class="space-y-2">
+                        <div class="flex items-center gap-2 sm:gap-3">
+                            <h2 class="text-2xl sm:text-3xl md:text-4xl font-semibold tracking-tight text-slate-900" x-text="currentWord?.headword"></h2>
+                            <span x-show="currentWord?.headword && currentWord.headword.includes(' ')" class="inline-flex items-center rounded bg-teal-100 px-2 sm:px-2.5 py-0.5 sm:py-1 text-[10px] sm:text-xs font-semibold text-teal-800">短语</span>
+                        </div>
+                        <p x-show="currentWord?.translation_zh" class="text-sm sm:text-base text-slate-600" x-text="formatTranslation(currentWord?.translation_zh)"></p>
+                        <p x-show="currentWord?.queried_variant" class="text-xs text-slate-400">
+                            通过变体 <span class="font-medium text-slate-600" x-text="currentWord?.queried_variant?.text"></span>
+                        </p>
+                        <div x-show="currentWord?.pronunciations && currentWord?.pronunciations.length" class="flex flex-wrap gap-2">
+                            <template x-for="pron in (currentWord?.pronunciations || [])" :key="pron.ipa + pron.accent">
+                                <span class="pronunciation-badge inline-flex items-center gap-2">
+                                    <span class="font-semibold text-[11px] uppercase tracking-wide text-slate-500" x-text="getAccentLabel(pron.accent)"></span>
+                                    <span class="ipa-text text-slate-700">/<span x-text="pron.ipa"></span>/</span>
+                                </span>
+                            </template>
+                        </div>
+                    </div>
+                    <div class="flex flex-wrap gap-2 md:justify-end">
+                        <span x-show="currentWord?.cefr_level > 0" :class="getCEFRBadgeClass(currentWord?.cefr_level)" class="level-badge bg-white border border-slate-200 text-slate-700" x-text="getCEFRLevelText(currentWord?.cefr_level)"></span>
+                        <span x-show="currentWord?.cet_level > 0" class="level-badge bg-white border border-slate-200 text-slate-700" x-text="getCETLevelText(currentWord?.cet_level)"></span>
+                        <span x-show="currentWord?.oxford_level > 0" class="level-badge bg-white border border-yellow-200 text-yellow-700" x-text="getOxfordLevelText(currentWord?.oxford_level)"></span>
+                        <span x-show="currentWord?.frequency_rank > 0 && currentWord?.frequency_rank <= 10000" class="level-badge bg-white border border-slate-200 text-slate-600 font-mono">TOP<span x-text="currentWord?.frequency_rank"></span></span>
+                        <span x-show="currentWord?.collins_stars > 0" class="level-badge bg-white border border-amber-300 text-amber-600" x-text="'★'.repeat(currentWord?.collins_stars)"></span>
+                    </div>
+                </div>
+                <hr class="border-slate-200">
+            </header>
+
+            <!-- 相关短语区域 -->
+            <section x-show="relatedPhrases.length > 0" class="space-y-3">
+                <h3 class="text-sm font-semibold tracking-wide text-slate-700">相关短语</h3>
+                <div class="flex flex-wrap gap-2">
+                    <template x-for="phrase in relatedPhrases" :key="phrase.headword">
+                        <button
+                            class="inline-flex items-baseline gap-2 rounded border border-slate-200 bg-slate-50 px-3 py-1.5 text-sm text-slate-600 transition hover:border-rose-200 hover:bg-rose-500/5"
+                            @click="selectSuggestion(phrase.headword)"
+                        >
+                            <span class="font-medium" x-text="phrase.headword"></span>
+                            <span x-show="phrase.translation_zh" class="text-xs text-teal-600" x-text="formatTranslation(phrase.translation_zh)"></span>
+                        </button>
+                    </template>
+                </div>
+            </section>
+
+            <section x-show="getValidVariants().length > 0" class="space-y-3">
+                <h3 class="text-sm font-semibold tracking-wide text-slate-700">词形变化</h3>
+                <div class="flex flex-wrap gap-2">
+                    <template x-for="(variant, index) in getValidVariants()" :key="'valid-' + index">
+                        <span class="inline-flex items-baseline gap-2 rounded border border-slate-200 bg-slate-50 px-3 py-1.5 text-sm text-slate-600">
+                            <span class="text-xs font-medium text-slate-500" x-text="getFormTypeLabel(variant.form_type)"></span>
+                            <span class="font-semibold text-slate-800" x-text="variant.variant_text"></span>
+                            <span x-show="variant.frequency_rank > 0 && variant.frequency_rank <= 5000" class="text-xs text-slate-400">TOP<span x-text="variant.frequency_rank"></span></span>
+                        </span>
+                    </template>
+                </div>
+            </section>
+
+            <section x-show="getAliasVariants().length > 0" class="space-y-3">
+                <h3 class="text-sm font-semibold tracking-wide text-slate-700">拼写变体</h3>
+                <div class="flex flex-wrap gap-2">
+                    <template x-for="(variant, index) in getAliasVariants()" :key="'alias-' + index">
+                        <span class="inline-flex items-baseline gap-2 rounded border border-slate-200 bg-slate-50 px-3 py-1.5 text-sm text-slate-600">
+                            <span class="font-semibold text-slate-800" x-text="variant.variant_text"></span>
+                            <span x-show="variant.frequency_rank > 0 && variant.frequency_rank <= 5000" class="text-xs text-slate-400">TOP<span x-text="variant.frequency_rank"></span></span>
+                        </span>
+                    </template>
+                </div>
+            </section>
+
+            <section>
+                <div x-show="getGroupedSenses().length" class="space-y-8">
+                    <template x-for="group in getGroupedSenses()" :key="group.key">
+                        <article>
+                            <header class="mb-4 flex items-baseline gap-4">
+                                <span class="pos-badge" x-text="group.label"></span>
+                                <span class="text-xs uppercase tracking-widest text-slate-400" x-show="group.countLabel" x-text="group.countLabel"></span>
+                            </header>
+                            <div class="space-y-6">
+                                <template x-for="(sense, index) in group.senses" :key="sense.sense_id || index">
+                                    <div class="definition-entry pl-0 md:pl-5">
+                                        <div class="flex items-start gap-3">
+                                            <span class="text-sm font-semibold text-slate-400" x-text="index + 1"></span>
+                                            <div class="flex-1 space-y-2">
+                                                <div class="flex flex-col gap-1">
+                                                    <p x-show="sense.definition_en" class="text-[15px] leading-relaxed text-slate-800" x-text="sense.definition_en"></p>
+                                                    <p x-show="sense.definition_zh" class="text-[14px] text-slate-500" x-text="sense.definition_zh"></p>
+                                                </div>
+                                                <div class="flex flex-wrap items-center gap-2" x-show="sense.cefr_level > 0 || sense.oxford_level > 0">
+                                                    <span x-show="sense.cefr_level > 0" :class="getCEFRBadgeClass(sense.cefr_level)" class="rounded bg-white px-1.5 py-0.5 text-[10px] font-semibold" x-text="getCEFRLevelText(sense.cefr_level)"></span>
+                                                    <span x-show="sense.oxford_level > 0" class="rounded bg-yellow-100 px-1.5 py-0.5 text-[10px] font-semibold text-yellow-700" x-text="getOxfordLevelText(sense.oxford_level)"></span>
+                                                </div>
+                                                <div x-show="sense.examples && sense.examples.length" class="space-y-2">
+                                                    <template x-for="example in sense.examples" :key="example.example_id || example.sentence_en">
+                                                        <div class="space-y-1">
+                                                            <p x-show="example.sentence_en" class="text-[13.5px] leading-relaxed text-slate-600 italic" x-html="highlightWord(example.sentence_en, currentWord?.headword)"></p>
+                                                            <p x-show="example.sentence_zh" class="text-[12.5px] leading-relaxed text-slate-400" x-text="example.sentence_zh"></p>
+                                                        </div>
+                                                    </template>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </template>
+                            </div>
+                        </article>
+                    </template>
+                </div>
+
+                <div x-show="!getGroupedSenses().length" class="rounded-lg border border-dashed border-slate-300 bg-slate-50 px-4 py-8 text-center text-sm text-slate-400">
+                    暂无详细释义
+                </div>
+            </section>
+        </section>
+
+        <!-- 数据来源展示 -->
+        <section x-show="!hasSearched" x-transition class="rounded-3xl border border-slate-200 bg-white px-4 sm:px-6 md:px-8 py-8 sm:py-10 shadow-sm">
+            <div class="text-center space-y-3 mb-8">
+                <p class="text-xs font-semibold tracking-[0.4em] text-red-500">数据来源</p>
+                <h3 class="text-xl font-semibold text-slate-900">代码开源 · 数据源独立授权</h3>
+                <p class="text-sm text-slate-500">项目代码采用 MIT 开源协议，数据源保持各自的原始许可授权</p>
+            </div>
+            <div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                <div class="rounded-xl border border-slate-100 bg-slate-50/50 px-4 sm:px-5 py-3 sm:py-4">
+                    <div class="flex items-start justify-between">
+                        <div class="flex-1">
+                            <h4 class="font-semibold text-slate-900">Wiktionary</h4>
+                            <p class="mt-1 text-xs text-slate-500">71.5万词条 · CC BY-SA 4.0</p>
+                        </div>
+                        <span class="rounded-full bg-green-100 px-2 py-0.5 text-[10px] font-medium text-green-700">核心数据</span>
+                    </div>
+                    <p class="mt-3 text-xs leading-relaxed text-slate-600">提供词条、发音、释义、例句、词形变化等核心数据（via Wiktextract）</p>
+                </div>
+                <div class="rounded-xl border border-slate-100 bg-slate-50/50 px-4 sm:px-5 py-3 sm:py-4">
+                    <div class="flex items-start justify-between">
+                        <div class="flex-1">
+                            <h4 class="font-semibold text-slate-900">ECDICT</h4>
+                            <p class="mt-1 text-xs text-slate-500">26万翻译 · MIT License</p>
+                        </div>
+                        <span class="rounded-full bg-purple-100 px-2 py-0.5 text-[10px] font-medium text-purple-700">中文翻译</span>
+                    </div>
+                    <p class="mt-3 text-xs leading-relaxed text-slate-600">提供简明中文翻译与柯林斯星级评定</p>
+                </div>
+                <div class="rounded-xl border border-slate-100 bg-slate-50/50 px-4 sm:px-5 py-3 sm:py-4">
+                    <div class="flex items-start justify-between">
+                        <div class="flex-1">
+                            <h4 class="font-semibold text-slate-900">Oxford 3000/5000</h4>
+                            <p class="mt-1 text-xs text-slate-500">5,917词 · 教育研究使用</p>
+                        </div>
+                        <span class="rounded-full bg-yellow-100 px-2 py-0.5 text-[10px] font-medium text-yellow-700">核心词汇</span>
+                    </div>
+                    <p class="mt-3 text-xs leading-relaxed text-slate-600">提供牛津核心词汇与 CEFR 等级标注</p>
+                </div>
+                <div class="rounded-xl border border-slate-100 bg-slate-50/50 px-4 sm:px-5 py-3 sm:py-4">
+                    <div class="flex items-start justify-between">
+                        <div class="flex-1">
+                            <h4 class="font-semibold text-slate-900">CEFR-J</h4>
+                            <p class="mt-1 text-xs text-slate-500">8,658词 · 免费商业使用 (A1-B2) + CC BY-SA 4.0 (C1-C2)</p>
+                        </div>
+                        <span class="rounded-full bg-blue-100 px-2 py-0.5 text-[10px] font-medium text-blue-700">等级标准</span>
+                    </div>
+                    <p class="mt-3 text-xs leading-relaxed text-slate-600">欧洲语言共同参考框架（A1-C2）词汇分级，TUFS 数据可商业使用</p>
+                </div>
+                <div class="rounded-xl border border-slate-100 bg-slate-50/50 px-4 sm:px-5 py-3 sm:py-4">
+                    <div class="flex items-start justify-between">
+                        <div class="flex-1">
+                            <h4 class="font-semibold text-slate-900">CET 4/6</h4>
+                            <p class="mt-1 text-xs text-slate-500">5,414词 · 官方大纲</p>
+                        </div>
+                        <span class="rounded-full bg-red-100 px-2 py-0.5 text-[10px] font-medium text-red-700">考试词汇</span>
+                    </div>
+                    <p class="mt-3 text-xs leading-relaxed text-slate-600">大学英语四六级官方词汇表</p>
+                </div>
+                <div class="rounded-xl border border-slate-100 bg-slate-50/50 px-4 sm:px-5 py-3 sm:py-4">
+                    <div class="flex items-start justify-between">
+                        <div class="flex-1">
+                            <h4 class="font-semibold text-slate-900">FrequencyWords</h4>
+                            <p class="mt-1 text-xs text-slate-500">5万词 · CC BY-SA 4.0</p>
+                        </div>
+                        <span class="rounded-full bg-teal-100 px-2 py-0.5 text-[10px] font-medium text-teal-700">词频数据</span>
+                    </div>
+                    <p class="mt-3 text-xs leading-relaxed text-slate-600">基于多语料库的真实使用频率统计</p>
+                </div>
+            </div>
+            
+            <!-- 许可证说明 -->
+            <div class="mt-8 rounded-2xl border border-blue-200/60 bg-gradient-to-br from-blue-50/40 to-white px-5 sm:px-6 py-5">
+                <div class="flex items-start gap-3">
+                    <div class="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-lg bg-blue-100 text-blue-600">
+                        <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                        </svg>
+                    </div>
+                    <div class="flex-1 space-y-2">
+                        <h5 class="text-sm font-semibold text-slate-900">许可证说明</h5>
+                        <div class="space-y-1.5 text-xs leading-relaxed text-slate-600">
+                            <p><strong class="text-slate-700">项目代码：</strong>采用 MIT 开源协议，可自由使用、修改和分发。访问 <a href="https://github.com/lzzsG/isdict" target="_blank" class="text-blue-600 hover:underline">GitHub 仓库</a> 获取源码。</p>
+                            <p><strong class="text-slate-700">数据使用：</strong>核心数据源自 Wiktionary、FrequencyWords (CC BY-SA 4.0)；ECDICT (MIT)；CEFR-J (A1-B2 免费商业使用 + C1-C2 CC BY-SA 4.0)；Oxford (教育研究使用)。</p>
+                            <p><strong class="text-slate-700">API 服务：</strong>本站提供查询 API 服务不构成数据再分发，符合所有数据源使用条款，可合法商业化。</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- API 快速入门 -->
+        <section x-show="!hasSearched" x-transition class="rounded-3xl border border-slate-200 bg-gradient-to-br from-white to-slate-50 px-4 sm:px-6 md:px-8 py-8 sm:py-10 shadow-sm">
+            <div class="text-center space-y-3 mb-8">
+                <p class="text-xs font-semibold tracking-[0.4em] text-red-500">开发者接入</p>
+                <h3 class="text-xl font-semibold text-slate-900">RESTful API · 9个端点 · 开箱即用</h3>
+                <p class="text-sm text-slate-500">提供完整的词典查询 API，支持单词查询、批量查询、短语查询、搜索补全等功能</p>
+            </div>
+
+            <!-- API 基础信息 -->
+            <div class="mb-8 rounded-2xl border border-blue-200/60 bg-gradient-to-br from-blue-50/40 to-white px-5 sm:px-6 py-5">
+                <div class="flex items-start gap-3">
+                    <div class="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-lg bg-blue-100 text-blue-600">
+                        <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path>
+                        </svg>
+                    </div>
+                    <div class="flex-1 space-y-3">
+                        <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                            <h5 class="text-sm font-semibold text-slate-900">API 基础路径</h5>
+                            <div class="flex items-center gap-2">
+                                <code class="rounded-lg bg-slate-800 px-3 py-1.5 text-xs font-mono text-slate-100">/api/v1</code>
+                                <span class="rounded-full bg-green-100 px-2 py-0.5 text-[10px] font-semibold text-green-700">在线服务</span>
+                            </div>
+                        </div>
+                        <div class="grid gap-2 sm:grid-cols-3 text-xs">
+                            <div class="flex items-center gap-2 text-slate-600">
+                                <svg class="h-3.5 w-3.5 text-green-500" fill="currentColor" viewBox="0 0 20 20">
+                                    <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"></path>
+                                </svg>
+                                <span>免费使用</span>
+                            </div>
+                            <div class="flex items-center gap-2 text-slate-600">
+                                <svg class="h-3.5 w-3.5 text-green-500" fill="currentColor" viewBox="0 0 20 20">
+                                    <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"></path>
+                                </svg>
+                                <span>无需认证</span>
+                            </div>
+                            <div class="flex items-center gap-2 text-slate-600">
+                                <svg class="h-3.5 w-3.5 text-green-500" fill="currentColor" viewBox="0 0 20 20">
+                                    <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"></path>
+                                </svg>
+                                <span>JSON 响应</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 常用接口示例 -->
+            <div class="space-y-4" x-data="{ activeTab: 'word' }">
+                <!-- Tab 切换 -->
+                <div class="flex flex-wrap gap-2 border-b border-slate-200 pb-3">
+                    <button @click="activeTab = 'word'" :class="activeTab === 'word' ? 'bg-red-500 text-white' : 'bg-white text-slate-600 hover:bg-slate-50'" class="rounded-lg px-4 py-2 text-sm font-medium transition">
+                        单词查询
+                    </button>
+                    <button @click="activeTab = 'variant'" :class="activeTab === 'variant' ? 'bg-red-500 text-white' : 'bg-white text-slate-600 hover:bg-slate-50'" class="rounded-lg px-4 py-2 text-sm font-medium transition">
+                        变体反查
+                    </button>
+                    <button @click="activeTab = 'phrases'" :class="activeTab === 'phrases' ? 'bg-red-500 text-white' : 'bg-white text-slate-600 hover:bg-slate-50'" class="rounded-lg px-4 py-2 text-sm font-medium transition">
+                        短语查询
+                    </button>
+                    <button @click="activeTab = 'search'" :class="activeTab === 'search' ? 'bg-red-500 text-white' : 'bg-white text-slate-600 hover:bg-slate-50'" class="rounded-lg px-4 py-2 text-sm font-medium transition">
+                        单词搜索
+                    </button>
+                    <button @click="activeTab = 'suggest'" :class="activeTab === 'suggest' ? 'bg-red-500 text-white' : 'bg-white text-slate-600 hover:bg-slate-50'" class="rounded-lg px-4 py-2 text-sm font-medium transition">
+                        自动补全
+                    </button>
+                    <button @click="activeTab = 'batch'" :class="activeTab === 'batch' ? 'bg-red-500 text-white' : 'bg-white text-slate-600 hover:bg-slate-50'" class="rounded-lg px-4 py-2 text-sm font-medium transition">
+                        批量查询
+                    </button>
+                </div>
+
+                <!-- 单词查询 -->
+                <div x-show="activeTab === 'word'" x-cloak class="space-y-4">
+                    <div class="rounded-xl border border-slate-200 bg-white p-5">
+                        <div class="flex items-start justify-between gap-4 mb-3">
+                            <div>
+                                <h6 class="text-sm font-semibold text-slate-900">查询单词完整信息</h6>
+                                <p class="mt-1 text-xs text-slate-500">获取单词的发音、释义、例句、词形变化等完整数据</p>
+                            </div>
+                            <span class="rounded-md bg-green-100 px-2 py-1 text-xs font-mono text-green-700">GET</span>
+                        </div>
+                        <div class="space-y-3">
+                            <div class="rounded-lg bg-slate-900 p-4">
+                                <div class="flex items-center justify-between mb-2">
+                                    <span class="text-xs text-slate-400">请求示例</span>
+                                    <button @click="navigator.clipboard.writeText('/api/v1/words/example')" class="text-xs text-blue-400 hover:text-blue-300">复制</button>
+                                </div>
+                                <code class="block text-xs sm:text-sm font-mono text-slate-100 break-all">/api/v1/words/example</code>
+                            </div>
+                            <div class="rounded-lg bg-slate-50 border border-slate-200 p-4">
+                                <div class="flex items-center justify-between mb-2">
+                                    <span class="text-xs text-slate-600 font-semibold">可选参数</span>
+                                </div>
+                                <div class="space-y-2 text-xs text-slate-600">
+                                    <div class="flex gap-2"><code class="text-blue-600">accent</code> - 过滤口音（british, american 等）</div>
+                                    <div class="flex gap-2"><code class="text-blue-600">include_variants</code> - 包含变体（默认 true）</div>
+                                    <div class="flex gap-2"><code class="text-blue-600">include_pronunciations</code> - 包含发音（默认 true）</div>
+                                    <div class="flex gap-2"><code class="text-blue-600">include_senses</code> - 包含释义与例句（默认 true）</div>
+                                </div>
+                            </div>
+                            <div class="flex gap-2">
+                                <a href="/api/v1/words/example" target="_blank" class="flex-1 inline-flex items-center justify-center gap-2 rounded-lg bg-blue-500 px-4 py-2 text-sm font-medium text-white transition hover:bg-blue-600">
+                                    <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"></path>
+                                    </svg>
+                                    在新窗口测试
+                                </a>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 变体反查 -->
+                <div x-show="activeTab === 'variant'" x-cloak class="space-y-4">
+                    <div class="rounded-xl border border-slate-200 bg-white p-5">
+                        <div class="flex items-start justify-between gap-4 mb-3">
+                            <div>
+                                <h6 class="text-sm font-semibold text-slate-900">通过词形变化查找原型</h6>
+                                <p class="mt-1 text-xs text-slate-500">将 "lit" 还原为 "light"，"running" 还原为 "run"</p>
+                            </div>
+                            <span class="rounded-md bg-green-100 px-2 py-1 text-xs font-mono text-green-700">GET</span>
+                        </div>
+                        <div class="space-y-3">
+                            <div class="rounded-lg bg-slate-900 p-4">
+                                <div class="flex items-center justify-between mb-2">
+                                    <span class="text-xs text-slate-400">请求示例</span>
+                                    <button @click="navigator.clipboard.writeText('/api/v1/words/by-variant/lit')" class="text-xs text-blue-400 hover:text-blue-300">复制</button>
+                                </div>
+                                <code class="block text-xs sm:text-sm font-mono text-slate-100 break-all">/api/v1/words/by-variant/lit</code>
+                            </div>
+                            <div class="rounded-lg bg-slate-50 border border-slate-200 p-4">
+                                <div class="flex items-center justify-between mb-2">
+                                    <span class="text-xs text-slate-600 font-semibold">可选参数</span>
+                                </div>
+                                <div class="space-y-2 text-xs text-slate-600">
+                                    <div class="flex gap-2"><code class="text-blue-600">kind</code> - 过滤类型（form: 词形, alias: 别名）</div>
+                                    <div class="flex gap-2"><code class="text-blue-600">include_pronunciations</code> - 包含发音（默认 true）</div>
+                                    <div class="flex gap-2"><code class="text-blue-600">include_senses</code> - 包含释义（默认 true）</div>
+                                </div>
+                            </div>
+                            <div class="flex gap-2">
+                                <a href="/api/v1/words/by-variant/lit" target="_blank" class="flex-1 inline-flex items-center justify-center gap-2 rounded-lg bg-blue-500 px-4 py-2 text-sm font-medium text-white transition hover:bg-blue-600">
+                                    <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"></path>
+                                    </svg>
+                                    在新窗口测试
+                                </a>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 短语查询 -->
+                <div x-show="activeTab === 'phrases'" x-cloak class="space-y-4">
+                    <div class="rounded-xl border border-slate-200 bg-white p-5">
+                        <div class="flex items-start justify-between gap-4 mb-3">
+                            <div>
+                                <h6 class="text-sm font-semibold text-slate-900">查询包含关键词的短语</h6>
+                                <p class="mt-1 text-xs text-slate-500">搜索 "take" 可找到 "take care of"、"take part in" 等短语</p>
+                            </div>
+                            <span class="rounded-md bg-green-100 px-2 py-1 text-xs font-mono text-green-700">GET</span>
+                        </div>
+                        <div class="space-y-3">
+                            <div class="rounded-lg bg-slate-900 p-4">
+                                <div class="flex items-center justify-between mb-2">
+                                    <span class="text-xs text-slate-400">请求示例</span>
+                                    <button @click="navigator.clipboard.writeText('/api/v1/phrases?q=take&limit=10')" class="text-xs text-blue-400 hover:text-blue-300">复制</button>
+                                </div>
+                                <code class="block text-xs sm:text-sm font-mono text-slate-100 break-all">/api/v1/phrases?q=take&limit=10</code>
+                            </div>
+                            <div class="rounded-lg bg-slate-50 border border-slate-200 p-4">
+                                <div class="flex items-center justify-between mb-2">
+                                    <span class="text-xs text-slate-600 font-semibold">参数说明</span>
+                                </div>
+                                <div class="space-y-2 text-xs text-slate-600">
+                                    <div class="flex gap-2"><code class="text-blue-600">q</code> - 搜索关键词（必需，如 take, look, give）</div>
+                                    <div class="flex gap-2"><code class="text-blue-600">limit</code> - 返回数量（默认 10，最大 50）</div>
+                                </div>
+                            </div>
+                            <div class="flex gap-2">
+                                <a href="/api/v1/phrases?q=take&limit=10" target="_blank" class="flex-1 inline-flex items-center justify-center gap-2 rounded-lg bg-blue-500 px-4 py-2 text-sm font-medium text-white transition hover:bg-blue-600">
+                                    <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"></path>
+                                    </svg>
+                                    在新窗口测试
+                                </a>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 搜索补全 -->
+                <div x-show="activeTab === 'search'" x-cloak class="space-y-4">
+                    <div class="rounded-xl border border-slate-200 bg-white p-5">
+                        <div class="flex items-start justify-between gap-4 mb-3">
+                            <div>
+                                <h6 class="text-sm font-semibold text-slate-900">搜索单词</h6>
+                                <p class="mt-1 text-xs text-slate-500">支持模糊匹配关键词、多维过滤（词性、等级、词频等）</p>
+                            </div>
+                            <span class="rounded-md bg-green-100 px-2 py-1 text-xs font-mono text-green-700">GET</span>
+                        </div>
+                        <div class="space-y-3">
+                            <div class="rounded-lg bg-slate-900 p-4">
+                                <div class="flex items-center justify-between mb-2">
+                                    <span class="text-xs text-slate-400">请求示例</span>
+                                    <button @click="navigator.clipboard.writeText('/api/v1/search?q=test&oxford_level=1&cet_level=4&limit=10')" class="text-xs text-blue-400 hover:text-blue-300">复制</button>
+                                </div>
+                                <code class="block text-xs sm:text-sm font-mono text-slate-100 break-all">/api/v1/search?q=test&oxford_level=1&cet_level=4&limit=10</code>
+                            </div>
+                            <div class="rounded-lg bg-slate-50 border border-slate-200 p-4">
+                                <span class="text-xs text-slate-600 font-semibold">参数说明</span>
+                                <div class="mt-2 space-y-1.5 text-xs text-slate-600">
+                                    <div class="flex gap-2"><code class="text-blue-600">q</code> - 模糊匹配关键词（必需，最少 3 个字符）</div>
+                                    <div class="flex gap-2"><code class="text-blue-600">limit</code> - 返回数量（默认 20，最大 100）</div>
+                                    <div class="flex gap-2"><code class="text-blue-600">offset</code> - 偏移量（默认 0）</div>
+                                    <div class="flex gap-2"><code class="text-blue-600">pos</code> - 词性过滤（noun, verb 等）</div>
+                                    <div class="flex gap-2"><code class="text-blue-600">cefr_level</code> - CEFR 等级（0-6，如 3=B1）</div>
+                                    <div class="flex gap-2"><code class="text-blue-600">oxford_level</code> - 牛津等级（1=3000, 2=5000）</div>
+                                    <div class="flex gap-2"><code class="text-blue-600">cet_level</code> - 四六级（4=CET-4, 6=CET-6）</div>
+                                    <div class="flex gap-2"><code class="text-blue-600">max_frequency_rank</code> - 最大词频排名（如 5000）</div>
+                                    <div class="flex gap-2"><code class="text-blue-600">min_collins_stars</code> - 最小星级（1-5）</div>
+                                </div>
+                            </div>
+                            <div>
+                                <a href="/api/v1/search?q=test&limit=10" target="_blank" class="inline-flex w-full sm:w-auto items-center justify-center gap-2 rounded-lg bg-blue-500 px-4 py-2 text-sm font-medium text-white transition hover:bg-blue-600">
+                                    测试搜索
+                                </a>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 自动补全 -->
+                <div x-show="activeTab === 'suggest'" x-cloak class="space-y-4">
+                    <div class="rounded-xl border border-slate-200 bg-white p-5">
+                        <div class="flex items-start justify-between gap-4 mb-3">
+                            <div>
+                                <h6 class="text-sm font-semibold text-slate-900">单词自动补全</h6>
+                                <p class="mt-1 text-xs text-slate-500">根据前缀快速返回候选单词，适合输入提示</p>
+                            </div>
+                            <span class="rounded-md bg-green-100 px-2 py-1 text-xs font-mono text-green-700">GET</span>
+                        </div>
+                        <div class="space-y-3">
+                            <div class="rounded-lg bg-slate-900 p-4">
+                                <div class="flex items-center justify-between mb-2">
+                                    <span class="text-xs text-slate-400">请求示例</span>
+                                    <button @click="navigator.clipboard.writeText('/api/v1/suggest?prefix=exa&oxford_level=1&limit=10')" class="text-xs text-blue-400 hover:text-blue-300">复制</button>
+                                </div>
+                                <code class="block text-xs sm:text-sm font-mono text-slate-100 break-all">/api/v1/suggest?prefix=exa&oxford_level=1&limit=10</code>
+                            </div>
+                            <div class="rounded-lg bg-slate-50 border border-slate-200 p-4">
+                                <span class="text-xs text-slate-600 font-semibold">参数说明</span>
+                                <div class="mt-2 space-y-1.5 text-xs text-slate-600">
+                                    <div class="flex gap-2"><code class="text-blue-600">prefix</code> - 单词前缀（必需，最少 3 个字符，最多 50 个字符）</div>
+                                    <div class="flex gap-2"><code class="text-blue-600">limit</code> - 返回数量（默认 10，最大 50）</div>
+                                    <div class="flex gap-2"><code class="text-blue-600">cefr_level</code> - CEFR 等级（0-6）</div>
+                                    <div class="flex gap-2"><code class="text-blue-600">oxford_level</code> - 牛津等级（1=3000, 2=5000）</div>
+                                    <div class="flex gap-2"><code class="text-blue-600">cet_level</code> - 四六级（4=CET-4, 6=CET-6）</div>
+                                    <div class="flex gap-2"><code class="text-blue-600">max_frequency_rank</code> - 最大词频排名</div>
+                                    <div class="flex gap-2"><code class="text-blue-600">min_collins_stars</code> - 最小星级（1-5）</div>
+                                </div>
+                            </div>
+                            <div>
+                                <a href="/api/v1/suggest?prefix=exa&limit=10" target="_blank" class="inline-flex w-full sm:w-auto items-center justify-center gap-2 rounded-lg bg-blue-500 px-4 py-2 text-sm font-medium text-white transition hover:bg-blue-600">
+                                    测试补全
+                                </a>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 批量查询 -->
+                <div x-show="activeTab === 'batch'" x-cloak class="space-y-4">
+                    <div class="rounded-xl border border-slate-200 bg-white p-5">
+                        <div class="flex items-start justify-between gap-4 mb-3">
+                            <div>
+                                <h6 class="text-sm font-semibold text-slate-900">批量查询单词</h6>
+                                <p class="mt-1 text-xs text-slate-500">一次查询多个单词（最多 100 个），自动去重</p>
+                            </div>
+                            <span class="rounded-md bg-yellow-100 px-2 py-1 text-xs font-mono text-yellow-700">POST</span>
+                        </div>
+                        <div class="space-y-3">
+                            <div class="rounded-lg bg-slate-900 p-4">
+                                <div class="flex items-center justify-between mb-2">
+                                    <span class="text-xs text-slate-400">请求体 (JSON) - 完整示例</span>
+                                    <button @click="navigator.clipboard.writeText('{\"words\":[\"test\",\"example\",\"hello\"],\"include_variants\":true,\"include_pronunciations\":true,\"include_senses\":true}')" class="text-xs text-blue-400 hover:text-blue-300">复制</button>
+                                </div>
+                                <code class="block text-xs sm:text-sm font-mono text-slate-100 break-all">{
+  "words": ["test", "example", "hello"],
+  "include_variants": true,
+  "include_pronunciations": true,
+  "include_senses": true
+}</code>
+                            </div>
+                            <div class="rounded-lg bg-slate-50 border border-slate-200 p-4">
+                                <div class="text-xs text-slate-600 space-y-2">
+                                    <div><strong>端点:</strong> <code class="text-blue-600">/api/v1/words/batch</code></div>
+                                    <div><strong>方法:</strong> POST</div>
+                                    <div><strong>Content-Type:</strong> application/json</div>
+                                    <div class="pt-2 border-t border-dashed border-slate-200"></div>
+                                    <div class="space-y-1.5">
+                                        <div><strong>必需字段:</strong></div>
+                                        <div class="flex gap-2"><code class="text-blue-600">words</code> - 单词数组（必需，最多 100 个）</div>
+                                    </div>
+                                    <div class="pt-2 border-t border-dashed border-slate-200"></div>
+                                    <div class="space-y-1.5">
+                                        <div><strong>可选字段:</strong></div>
+                                        <div class="flex gap-2"><code class="text-blue-600">include_variants</code> - 是否返回变体（默认 true）</div>
+                                        <div class="flex gap-2"><code class="text-blue-600">include_pronunciations</code> - 是否返回发音（默认 true）</div>
+                                        <div class="flex gap-2"><code class="text-blue-600">include_senses</code> - 是否返回释义（默认 true）</div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 完整文档链接 -->
+            <div class="mt-8 flex flex-col sm:flex-row items-center justify-between gap-4 rounded-2xl border border-slate-200/80 bg-gradient-to-br from-white to-slate-50/50 px-6 py-5">
+                <div class="text-center sm:text-left">
+                    <h5 class="text-sm font-semibold text-slate-900">需要更多接口信息？</h5>
+                    <p class="mt-1 text-xs text-slate-500">查看完整 API 文档，了解所有 9 个端点的详细参数、响应格式和错误码</p>
+                </div>
+                <a href="https://github.com/lzzsG/isdict/blob/main/cmd/api/README.md" target="_blank" class="flex-shrink-0 inline-flex items-center gap-2 rounded-lg bg-slate-900 px-5 py-2.5 text-sm font-medium text-white transition hover:bg-slate-800">
+                    <svg class="h-4 w-4" fill="currentColor" viewBox="0 0 24 24">
+                        <path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"/>
+                    </svg>
+                    查看完整文档
+                </a>
+            </div>
+        </section>
+
+        <!-- 技术架构 -->
+        <section x-show="!hasSearched" x-transition class="rounded-3xl border border-slate-200 bg-gradient-to-br from-slate-50 to-white px-4 sm:px-6 md:px-8 py-8 sm:py-10 shadow-sm">
+            <div class="text-center space-y-3 mb-8">
+                <p class="text-xs font-semibold tracking-[0.4em] text-red-500">技术架构</p>
+                <h3 class="text-xl font-semibold text-slate-900">现代化技术栈 · 高性能 · 易维护</h3>
+                <p class="text-sm text-slate-500">从数据存储到前端交互，全栈架构精心设计</p>
+            </div>
+            
+            <div class="grid gap-6 lg:grid-cols-3">
+                <!-- PostgreSQL -->
+                <article class="group rounded-2xl border border-slate-100 bg-white px-5 py-6 transition hover:border-blue-200 hover:shadow-lg">
+                    <div class="flex items-start gap-4">
+                        <div class="flex h-12 w-12 flex-shrink-0 items-center justify-center rounded-xl bg-blue-50 text-blue-600 transition group-hover:bg-blue-100">
+                            <svg class="h-7 w-7" viewBox="0 0 25.6 25.6" xmlns="http://www.w3.org/2000/svg">
+                                <style>
+                                    .postgresql-b{stroke-linecap:round;}
+                                    .postgresql-c{stroke-linejoin:round;}
+                                    .postgresql-d{stroke-linejoin:miter;}
+                                    .postgresql-e{stroke-width:.716;}
+                                </style>
+                                <g fill="none" stroke="#fff">
+                                    <path d="M18.983 18.636c.163-1.357.114-1.555 1.124-1.336l.257.023c.777.035 1.793-.125 2.4-.402 1.285-.596 2.047-1.592.78-1.33-2.89.596-3.1-.383-3.1-.383 3.053-4.53 4.33-10.28 3.227-11.687-3.004-3.84-8.205-2.024-8.292-1.976l-.028.005c-.57-.12-1.2-.19-1.93-.2-1.308-.02-2.3.343-3.054.914 0 0-9.277-3.822-8.846 4.807.092 1.836 2.63 13.9 5.66 10.25C8.29 15.987 9.36 14.86 9.36 14.86c.53.353 1.167.533 1.834.468l.052-.044a2.01 2.01 0 0 0 .021.518c-.78.872-.55 1.025-2.11 1.346-1.578.325-.65.904-.046 1.056.734.184 2.432.444 3.58-1.162l-.046.183c.306.245.285 1.76.33 2.842s.116 2.093.337 2.688.48 2.13 2.53 1.7c1.713-.367 3.023-.896 3.143-5.81" fill="#000" stroke="#000" stroke-width="2.149" stroke-linecap="butt" class="postgresql-d"/>
+                                    <path d="M23.535 15.6c-2.89.596-3.1-.383-3.1-.383 3.053-4.53 4.33-10.28 3.228-11.687-3.004-3.84-8.205-2.023-8.292-1.976l-.028.005a10.31 10.31 0 0 0-1.929-.201c-1.308-.02-2.3.343-3.054.914 0 0-9.278-3.822-8.846 4.807.092 1.836 2.63 13.9 5.66 10.25C8.29 15.987 9.36 14.86 9.36 14.86c.53.353 1.167.533 1.834.468l.052-.044a2.02 2.02 0 0 0 .021.518c-.78.872-.55 1.025-2.11 1.346-1.578.325-.65.904-.046 1.056.734.184 2.432.444 3.58-1.163.35-.49-.002-1.27-.482-1.468-.232-.096-.542-.216-.94.23.306.245.52 1.593.484 2.815s-.06 2.06.18 2.716.48 2.13 2.53 1.7c1.713-.367 2.6-1.32 2.725-2.906.088-1.128.286-.962.3-1.97l.16-.478c.183-1.53.03-2.023 1.085-1.793l.257.023c.777.035 1.794-.125 2.39-.402 1.285-.596 2.047-1.592.78-1.33z" fill="#336791" stroke="none"/>
+                                    <g class="postgresql-e">
+                                        <g class="postgresql-b">
+                                            <path d="M12.814 16.467c-.08 2.846.02 5.712.298 6.4s.875 2.05 2.926 1.612c1.713-.367 2.337-1.078 2.607-2.647l.633-5.017M10.356 2.2S1.072-1.596 1.504 7.033c.092 1.836 2.63 13.9 5.66 10.25C8.27 15.95 9.27 14.907 9.27 14.907m6.1-13.4c-.32.1 5.164-2.005 8.282 1.978 1.1 1.407-.175 7.157-3.228 11.687" class="postgresql-c"/>
+                                            <path d="M20.425 15.17s.2.98 3.1.382c1.267-.262.504.734-.78 1.33-1.054.49-3.418.615-3.457-.06-.1-1.745 1.244-1.215 1.147-1.652-.088-.394-.69-.78-1.086-1.744-.347-.84-4.76-7.29 1.224-6.333.22-.045-1.56-5.7-7.16-5.782S7.99 8.196 7.99 8.196" stroke-linejoin="bevel"/>
+                                        </g>
+                                        <g class="postgresql-c">
+                                            <path d="M11.247 15.768c-.78.872-.55 1.025-2.11 1.346-1.578.325-.65.904-.046 1.056.734.184 2.432.444 3.58-1.163.35-.49-.002-1.27-.482-1.468-.232-.096-.542-.216-.94.23z"/>
+                                            <path d="M11.196 15.753c-.08-.513.168-1.122.433-1.836.398-1.07 1.316-2.14.582-5.537-.547-2.53-4.22-.527-4.22-.184s.166 1.74-.06 3.365c-.297 2.122 1.35 3.916 3.246 3.733" class="postgresql-b"/>
+                                        </g>
+                                    </g>
+                                    <g fill="#fff" class="postgresql-d">
+                                        <path d="M10.322 8.145c-.017.117.215.43.516.472s.558-.202.575-.32-.215-.246-.516-.288-.56.02-.575.136z" stroke-width=".239"/>
+                                        <path d="M19.486 7.906c.016.117-.215.43-.516.472s-.56-.202-.575-.32.215-.246.516-.288.56.02.575.136z" stroke-width=".119"/>
+                                    </g>
+                                    <path d="M20.562 7.095c.05.92-.198 1.545-.23 2.524-.046 1.422.678 3.05-.413 4.68" class="postgresql-b postgresql-c postgresql-e"/>
+                                </g>
+                            </svg>
+                        </div>
+                        <div class="flex-1 space-y-3">
+                            <div>
+                                <h4 class="text-lg font-semibold text-slate-900 whitespace-nowrap">PostgreSQL 数据库</h4>
+                                <p class="mt-1 text-xs text-slate-500">关系型数据库 · 企业级可靠性</p>
+                            </div>
+                            <ul class="space-y-1.5 text-xs text-slate-600">
+                                <li class="flex items-start gap-2">
+                                    <svg class="mt-0.5 h-3.5 w-3.5 flex-shrink-0 text-blue-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/>
+                                    </svg>
+                                    <span>精简 5 张表设计，涵盖词条、释义、发音、例句、变体</span>
+                                </li>
+                                <li class="flex items-start gap-2">
+                                    <svg class="mt-0.5 h-3.5 w-3.5 flex-shrink-0 text-blue-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/>
+                                    </svg>
+                                    <span>27 个复合索引优化，实现前缀、短语、变体等多维检索</span>
+                                </li>
+                                <li class="flex items-start gap-2">
+                                    <svg class="mt-0.5 h-3.5 w-3.5 flex-shrink-0 text-blue-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/>
+                                    </svg>
+                                    <span>JSONB 字段存储复杂结构，兼顾性能与灵活性</span>
+                                </li>
+                            </ul>
+                        </div>
+                    </div>
+                </article>
+
+                <!-- Go + Gin -->
+                <article class="group rounded-2xl border border-slate-100 bg-white px-5 py-6 transition hover:border-cyan-200 hover:shadow-lg">
+                    <div class="flex items-start gap-4">
+                        <div class="flex h-12 w-12 flex-shrink-0 items-center justify-center rounded-xl bg-cyan-50 text-cyan-600 transition group-hover:bg-cyan-100">
+                            <svg class="h-7 w-7" viewBox="0 0 48 48" xmlns="http://www.w3.org/2000/svg">
+                                <g fill="#ffcc80">
+                                    <path d="m35.547 42.431-3.182-3.182-2.121 2.121 3.182 3.182c.586.586 1.536.586 2.121 0s.586-1.536 0-2.121z"/>
+                                    <path d="m38.547 24.431-3.182-3.182-2.121 2.121 3.182 3.182c.586.586 1.536.586 2.121 0s.586-1.536 0-2.121z"/>
+                                    <path d="m12.683 42.431 3.182-3.182 2.121 2.121-3.182 3.182c-.586.586-1.536.586-2.121 0s-.586-1.536 0-2.121z"/>
+                                    <path d="m9.433 24.431 3.182-3.182 2.121 2.121-3.182 3.182c-.586.586-1.536.586-2.121 0s-.586-1.536 0-2.121z"/>
+                                </g>
+                                <g fill="#4dd0e1">
+                                    <path d="m38 8c0-1.933-1.149-3-3.231-3s-3.769 2.567-3.769 4.5c0 1 1.923 1.5 3 1.5 2.082 0 4-.067 4-3z"/>
+                                    <path d="m10 8c0-1.933 1.149-3 3.231-3s3.769 2.567 3.769 4.5c0 1-1.923 1.5-3 1.5-2.082 0-4-.067-4-3z"/>
+                                </g>
+                                <g fill="#424242">
+                                    <circle cx="35" cy="8" r="1"/>
+                                    <circle cx="13" cy="8" r="1"/>
+                                </g>
+                                <path d="m37 34c0 4.774-3.219 10-13.31 10-8.122 0-12.69-5.226-12.69-10 0-5 1-5.806 1-10 0-4.688 0-7 0-10 0-4.774 3.076-11 11.69-11s12.31 5.991 12.31 12c0 3-.237 5.453 0 10 .186 3.562 1 8 1 11z" fill="#4dd0e1"/>
+                                <g fill="#f5f5f5">
+                                    <circle cx="29" cy="10" r="4"/>
+                                    <circle cx="19" cy="10" r="4"/>
+                                </g>
+                                <g fill="#eeeeee">
+                                    <path d="m24 20c0 .552.448 1 1 1s1-.448 1-1v-3h-2z"/>
+                                    <path d="m22 20c0 .552.448 1 1 1s1-.448 1-1v-3h-2z"/>
+                                </g>
+                                <path d="m26.5 18c-.412 0-.653-.085-1.011-.205-.975-.328-2.021-.326-2.996.002-.355-.119-.583-.203-.993-.203-1.334 0-1.5-1-1.5-1.5 0-1.5 1.5-2.5 3-2.5.835 0 1.165 0 2 0 1.5 0 3 1 3 2.5 0 .898-.166 1.906-1.5 1.906z" fill="#ffcc80"/>
+                                <g fill="#424242">
+                                    <circle cx="27" cy="10" r="1"/>
+                                    <circle cx="17" cy="10" r="1"/>
+                                    <ellipse cx="24" cy="14" rx="2" ry="1"/>
+                                </g>
+                            </svg>
+                        </div>
+                        <div class="flex-1 space-y-3">
+                            <div>
+                                <h4 class="text-lg font-semibold text-slate-900 whitespace-nowrap">Go + Gin 后端</h4>
+                                <p class="mt-1 text-xs text-slate-500">高性能 Web 框架 · 并发优势</p>
+                            </div>
+                            <ul class="space-y-1.5 text-xs text-slate-600">
+                                <li class="flex items-start gap-2">
+                                    <svg class="mt-0.5 h-3.5 w-3.5 flex-shrink-0 text-cyan-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/>
+                                    </svg>
+                                    <span>标准三层架构：Handler → Service → Repository</span>
+                                </li>
+                                <li class="flex items-start gap-2">
+                                    <svg class="mt-0.5 h-3.5 w-3.5 flex-shrink-0 text-cyan-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/>
+                                    </svg>
+                                    <span>8 个 RESTful 端点，覆盖查询、搜索、补全等场景</span>
+                                </li>
+                                <li class="flex items-start gap-2">
+                                    <svg class="mt-0.5 h-3.5 w-3.5 flex-shrink-0 text-cyan-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/>
+                                    </svg>
+                                    <span>原生协程支持，高效应对高并发请求</span>
+                                </li>
+                            </ul>
+                        </div>
+                    </div>
+                </article>
+
+                <!-- Tailwind + Alpine.js -->
+                <article class="group rounded-2xl border border-slate-100 bg-white px-5 py-6 transition hover:border-rose-200 hover:shadow-lg">
+                    <div class="flex items-start gap-4">
+                        <div class="flex h-12 w-12 flex-shrink-0 items-center justify-center rounded-xl bg-rose-50 text-rose-600 transition group-hover:bg-rose-100">
+                            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.7" stroke="currentColor" class="h-7 w-7">
+                                <path stroke-linecap="round" stroke-linejoin="round" d="M15.59 14.37a6 6 0 0 1-5.84 7.38v-4.8m5.84-2.58a14.98 14.98 0 0 0 6.16-12.12A14.98 14.98 0 0 0 9.631 8.41m5.96 5.96a14.926 14.926 0 0 1-5.841 2.58m-.119-8.54a6 6 0 0 0-7.381 5.84h4.8m2.581-5.84a14.927 14.927 0 0 0-2.58 5.84m2.699 2.7c-.103.021-.207.041-.311.06a15.09 15.09 0 0 1-2.448-2.448 14.9 14.9 0 0 1 .06-.312m-2.24 2.39a4.493 4.493 0 0 0-1.757 4.306 4.493 4.493 0 0 0 4.306-1.758M16.5 9a1.5 1.5 0 1 1-3 0 1.5 1.5 0 0 1 3 0Z" />
+                            </svg>
+                        </div>
+                        <div class="flex-1 space-y-3">
+                            <div>
+                                <h4 class="text-lg font-semibold text-slate-900 whitespace-nowrap">Tailwind + Alpine.js</h4>
+                                <p class="mt-1 text-xs text-slate-500">零构建前端 · 声明式交互</p>
+                            </div>
+                            <ul class="space-y-1.5 text-xs text-slate-600">
+                                <li class="flex items-start gap-2">
+                                    <svg class="mt-0.5 h-3.5 w-3.5 flex-shrink-0 text-rose-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/>
+                                    </svg>
+                                    <span>Tailwind CSS 原子化设计，响应式布局即插即用</span>
+                                </li>
+                                <li class="flex items-start gap-2">
+                                    <svg class="mt-0.5 h-3.5 w-3.5 flex-shrink-0 text-rose-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/>
+                                    </svg>
+                                    <span>Alpine.js 轻量级响应式框架，零构建配置</span>
+                                </li>
+                                <li class="flex items-start gap-2">
+                                    <svg class="mt-0.5 h-3.5 w-3.5 flex-shrink-0 text-rose-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/>
+                                    </svg>
+                                    <span>单文件架构，部署简便快捷，便于二次开发</span>
+                                </li>
+                            </ul>
+                        </div>
+                    </div>
+                </article>
+            </div>
+
+            <!-- 架构优势总结 -->
+            <div class="mt-8 rounded-2xl border border-slate-200/80 bg-gradient-to-br from-white to-slate-50/30 px-6 py-5">
+                <div class="flex items-start gap-4">
+                    <div class="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-lg bg-gradient-to-br from-red-500 to-rose-600 text-white">
+                        <svg class="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/>
+                        </svg>
+                    </div>
+                    <div class="flex-1">
+                        <h5 class="text-sm font-semibold text-slate-900">为什么选择这套技术栈？</h5>
+                        <p class="mt-2 text-xs leading-relaxed text-slate-600">
+                            PostgreSQL + Go + Gin + Tailwind/Alpine.js 构成高性能、易维护的全栈解决方案。从数据存储到前端交互各司其职，特别适合构建现代化词典应用。
+                        </p>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- 搜索结果页底部信息 -->
+        <section x-show="hasSearched && currentWord && !loading" x-cloak class="mt-12 rounded-2xl border border-slate-200 bg-gradient-to-br from-slate-50 to-white px-4 sm:px-5 md:px-6 py-6 sm:py-8 shadow-sm">
+            <div class="space-y-6">
+                <!-- 数据来源快速参考 -->
+                <div>
+                    <h4 class="mb-3 text-xs font-semibold tracking-widest text-slate-400">当前词条数据来源</h4>
+                    <div class="flex flex-wrap gap-2">
+                        <template x-for="source in getWordDataSources()" :key="source.name">
+                            <span 
+                                class="inline-flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs transition"
+                                :class="source.available ? 'border-green-200 bg-green-50 text-green-700' : 'border-slate-200 bg-slate-50 text-slate-400'"
+                            >
+                                <svg x-show="source.available" class="h-3 w-3" fill="currentColor" viewBox="0 0 20 20">
+                                    <path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"/>
+                                </svg>
+                                <svg x-show="!source.available" class="h-3 w-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+                                </svg>
+                                <span x-text="source.name"></span>
+                            </span>
+                        </template>
+                    </div>
+                </div>
+
+                <!-- 词条统计信息 -->
+                <div>
+                    <h4 class="mb-3 text-xs font-semibold tracking-widest text-slate-400">词条详细信息</h4>
+                    <div class="grid gap-3 grid-cols-2 md:grid-cols-4">
+                        <div class="rounded-lg border border-slate-200 bg-white px-4 py-3">
+                            <p class="text-xs text-slate-500">义项数量</p>
+                            <p class="mt-1 text-lg font-semibold text-slate-900" x-text="(currentWord?.senses || []).length"></p>
+                        </div>
+                        <div class="rounded-lg border border-slate-200 bg-white px-4 py-3">
+                            <p class="text-xs text-slate-500">例句数量</p>
+                            <p class="mt-1 text-lg font-semibold text-slate-900" x-text="getTotalExamples()"></p>
+                        </div>
+                        <div class="rounded-lg border border-slate-200 bg-white px-4 py-3">
+                            <p class="text-xs text-slate-500">发音数据</p>
+                            <p class="mt-1 text-lg font-semibold text-slate-900" x-text="(currentWord?.pronunciations || []).length"></p>
+                        </div>
+                        <div class="rounded-lg border border-slate-200 bg-white px-4 py-3">
+                            <p class="text-xs text-slate-500">词形变体</p>
+                            <p class="mt-1 text-lg font-semibold text-slate-900" x-text="(currentWord?.variants || []).length"></p>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 快捷操作 -->
+                <div class="flex flex-wrap items-center justify-between gap-4 border-t border-slate-200 pt-6">
+                    <button 
+                        @click="resetToHome()"
+                        class="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm text-slate-600 transition hover:border-red-200 hover:bg-red-50 hover:text-red-600"
+                    >
+                        <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6"/>
+                        </svg>
+                        <span>返回首页</span>
+                    </button>
+                    <div class="flex flex-wrap gap-2 text-xs text-slate-500">
+                        <span>易思词典</span>
+                        <span>·</span>
+                        <span>isdict.com</span>
+                        <span>·</span>
+                        <span>71.5万词条</span>
+                        <span>·</span>
+                        <span>六大数据源</span>
+                        <span>·</span>
+                        <a href="https://github.com/lzzsG/isdict" target="_blank" class="text-red-600 hover:underline">开源项目</a>
+                    </div>
+                </div>
+            </div>
+        </section>
+    </main>
+
+    <footer class="border-t border-slate-200 bg-white" x-show="!hasSearched">
+        <div class="relative">
+            <div class="absolute inset-0 bg-gradient-to-br from-rose-50 via-white to-slate-50"></div>
+            <div class="relative max-w-5xl mx-auto px-3 sm:px-4 md:px-6 lg:px-8 py-8 sm:py-10">
+                <div class="grid gap-6 lg:grid-cols-[1.1fr_1fr_1fr]">
+                    <section class="rounded-2xl border border-white/80 bg-white/80 px-5 py-6 shadow-sm backdrop-blur">
+                        <div class="space-y-3">
+                            <div>
+                                <h5 class="text-sm font-semibold text-slate-900">关于项目</h5>
+                                <p class="mt-2 text-xs leading-relaxed text-slate-600">易思词典（isdict.com）专注进阶英语学习，整合六大数据源，提供结构化、可检索、可扩展的词汇知识库。</p>
+                            </div>
+                            <ul class="space-y-1 text-[11px] text-slate-500">
+                                <li>· 项目代码完全开源，采用 MIT 许可证</li>
+                                <li>· 支持检索、词形还原、短语关联等高级功能</li>
+                                <li>· 数据管线可重放执行，确保更新可追溯</li>
+                            </ul>
+                        </div>
+                    </section>
+
+                    <section class="rounded-2xl border border-slate-200/80 bg-white px-5 py-6 shadow-sm">
+                        <div class="flex items-center justify-between">
+                            <h5 class="text-sm font-semibold text-slate-900">快速链接</h5>
+                            <span class="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-medium text-slate-500">资源集</span>
+                        </div>
+                        <ul class="mt-4 space-y-2 text-xs text-slate-600">
+                            <li>
+                                <a href="https://github.com/lzzsG/isdict" target="_blank" class="group inline-flex items-center justify-between gap-2 w-full rounded-lg border border-transparent px-3 py-2 transition hover:border-red-200 hover:bg-rose-50">
+                                    <span class="group-hover:text-red-600">GitHub 仓库</span>
+                                    <svg class="h-3.5 w-3.5 text-slate-400 group-hover:text-red-500" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                                        <path d="M7 5h8v8" />
+                                        <path d="M15 5L5 15" />
+                                    </svg>
+                                </a>
+                            </li>
+                            <li>
+                                <a href="https://github.com/lzzsG/isdict/blob/main/README.md" target="_blank" class="group inline-flex items-center justify-between gap-2 w-full rounded-lg border border-transparent px-3 py-2 transition hover:border-red-200 hover:bg-rose-50">
+                                    <span class="group-hover:text-red-600">项目文档</span>
+                                    <svg class="h-3.5 w-3.5 text-slate-400 group-hover:text-red-500" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                                        <path d="M7 5h8v8" />
+                                        <path d="M15 5L5 15" />
+                                    </svg>
+                                </a>
+                            </li>
+                            <li>
+                                <a href="https://github.com/lzzsG/isdict/blob/main/cmd/api/README.md" target="_blank" class="group inline-flex items-center justify-between gap-2 w-full rounded-lg border border-transparent px-3 py-2 transition hover:border-red-200 hover:bg-rose-50">
+                                    <span class="group-hover:text-red-600">API 文档</span>
+                                    <svg class="h-3.5 w-3.5 text-slate-400 group-hover:text-red-500" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                                        <path d="M7 5h8v8" />
+                                        <path d="M15 5L5 15" />
+                                    </svg>
+                                </a>
+                            </li>
+                            <li>
+                                <a href="https://github.com/lzzsG/isdict/blob/main/docs/pipeline_guide.md" target="_blank" class="group inline-flex items-center justify-between gap-2 w-full rounded-lg border border-transparent px-3 py-2 transition hover:border-red-200 hover:bg-rose-50">
+                                    <span class="group-hover:text-red-600">数据管线</span>
+                                    <svg class="h-3.5 w-3.5 text-slate-400 group-hover:text-red-500" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                                        <path d="M7 5h8v8" />
+                                        <path d="M15 5L5 15" />
+                                    </svg>
+                                </a>
+                            </li>
+                        </ul>
+                        <div class="mt-6 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-[11px] text-slate-500">
+                            <p class="font-medium text-slate-600">想参与贡献？</p>
+                            <p class="mt-1">欢迎提交 Issue 或 PR，或通过 GitHub Star 支持项目。</p>
+                        </div>
+                    </section>
+
+                    <section class="rounded-2xl border border-slate-200/80 bg-white px-5 py-6 shadow-sm">
+                        <div class="flex items-center justify-between">
+                            <h5 class="text-sm font-semibold text-slate-900">数据规模</h5>
+                            <span class="rounded-full bg-emerald-50 px-2 py-0.5 text-[10px] font-medium text-emerald-600">持续扩容</span>
+                        </div>
+                        <dl class="mt-4 grid grid-cols-2 gap-3 text-xs text-slate-600">
+                            <div class="rounded-lg border border-slate-100 bg-slate-50 px-3 py-2">
+                                <dt class="text-[11px] text-slate-500">词条</dt>
+                                <dd class="mt-1 text-base font-semibold text-slate-900">715K+</dd>
+                            </div>
+                            <div class="rounded-lg border border-slate-100 bg-slate-50 px-3 py-2">
+                                <dt class="text-[11px] text-slate-500">义项</dt>
+                                <dd class="mt-1 text-base font-semibold text-slate-900">976K+</dd>
+                            </div>
+                            <div class="rounded-lg border border-slate-100 bg-slate-50 px-3 py-2">
+                                <dt class="text-[11px] text-slate-500">例句</dt>
+                                <dd class="mt-1 text-base font-semibold text-slate-900">584K+</dd>
+                            </div>
+                            <div class="rounded-lg border border-slate-100 bg-slate-50 px-3 py-2">
+                                <dt class="text-[11px] text-slate-500">词形变体</dt>
+                                <dd class="mt-1 text-base font-semibold text-slate-900">888K+</dd>
+                            </div>
+                            <div class="rounded-lg border border-slate-100 bg-slate-50 px-3 py-2">
+                                <dt class="text-[11px] text-slate-500">发音</dt>
+                                <dd class="mt-1 text-base font-semibold text-slate-900">160K+</dd>
+                            </div>
+                            <div class="rounded-lg border border-slate-100 bg-slate-50 px-3 py-2">
+                                <dt class="text-[11px] text-slate-500">覆盖口音</dt>
+                                <dd class="mt-1 text-base font-semibold text-slate-900">10 种</dd>
+                            </div>
+                        </dl>
+                        <p class="mt-4 text-[11px] leading-relaxed text-slate-500">数据源自 Wiktionary、Oxford、CEFR-J、CET、ECDICT、FrequencyWords 等权威资源，定期同步更新。</p>
+                    </section>
+                </div>
+
+                <div class="mt-8 flex flex-col gap-4 border-t border-slate-200 pt-6 sm:flex-row sm:items-center sm:justify-between">
+                    <div class="flex items-center gap-2 text-xs text-slate-500">
+                        <span class="inline-flex items-center gap-1 rounded-full bg-green-50 px-2 py-1 text-green-700">
+                            <svg class="h-3 w-3" viewBox="0 0 16 16" fill="currentColor">
+                                <path d="M8.75.75V2h.985c.304 0 .603.08.867.231l1.29.736c.038.022.08.033.124.033h2.234a.75.75 0 0 1 0 1.5h-.427l2.111 4.692a.75.75 0 0 1-.154.838l-.53-.53.529.531-.001.002-.002.002-.006.006-.006.005-.01.01-.045.04c-.21.176-.441.327-.686.45C14.556 10.78 13.88 11 13 11a4.498 4.498 0 0 1-2.023-.454 3.544 3.544 0 0 1-.686-.45l-.045-.04-.016-.015-.006-.006-.004-.004v-.001a.75.75 0 0 1-.154-.838L12.178 4.5h-.162c-.305 0-.604-.079-.868-.231l-1.29-.736a.245.245 0 0 0-.124-.033H8.75V13h2.5a.75.75 0 0 1 0 1.5h-6.5a.75.75 0 0 1 0-1.5h2.5V3.5h-.984a.245.245 0 0 0-.124.033l-1.289.737c-.265.15-.564.23-.869.23h-.162l2.112 4.692a.75.75 0 0 1-.154.838l-.53-.53.529.531-.001.002-.002.002-.006.006-.016.015-.045.04c-.21.176-.441.327-.686.45C4.556 10.78 3.88 11 3 11a4.498 4.498 0 0 1-2.023-.454 3.544 3.544 0 0 1-.686-.45l-.045-.04-.016-.015-.006-.006-.004-.004v-.001a.75.75 0 0 1-.154-.838L2.178 4.5H1.75a.75.75 0 0 1 0-1.5h2.234a.249.249 0 0 0 .125-.033l1.288-.737c.265-.15.564-.23.869-.23h.984V.75a.75.75 0 0 1 1.5 0Zm2.945 8.477c.285.135.718.273 1.305.273s1.02-.138 1.305-.273L13 6.327Zm-10 0c.285.135.718.273 1.305.273s1.02-.138 1.305-.273L3 6.327Z"/>
+                            </svg>
+                            MIT License
+                        </span>
+                        <span>开源项目 · 持续演进</span>
+                    </div>
+                    <div class="text-xs text-slate-500">
+                        © 2025 易思词典 · 代码开源 MIT 协议 ·  
+                        <a href="https://github.com/lzzsG/isdict/blob/main/data/data_sources.md" target="_blank" class="text-red-600 hover:underline">数据源遵循各自许可</a>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </footer>
+
+    <script>
+        function dictionaryApp() {
+            const createCache = () => Object.create(null);
+
+            return {
+                apiBaseURL: '/api/v1',
+                searchQuery: '',
+                currentWord: null,
+                suggestions: [],
+                searchResults: [],
+                relatedPhrases: [],
+                showSuggestions: false,
+                loading: false,
+                error: null,
+                hasSearched: false,
+                exampleWords: ['hello', 'study', 'beautiful', 'important', 'knowledge'],
+                examplePhrases: ['look forward to', 'take care of', 'come up with'],
+                suggestTimer: null,
+                pendingSuggestionController: null,
+                pendingPhraseController: null,
+                suggestionCache: createCache(),
+                wordCache: createCache(),
+                phraseCache: createCache(),
+                activeSearchToken: 0,
+
+                init() {
+                    const urlParams = new URLSearchParams(window.location.search);
+                    const word = urlParams.get('word');
+                    if (word) {
+                        this.searchQuery = word;
+                        this.performSearch();
+                    }
+                },
+
+                resetToHome() {
+                    this.currentWord = null;
+                    this.error = null;
+                    this.searchQuery = '';
+                    this.hasSearched = false;
+                    this.loading = false;
+                    this.showSuggestions = false;
+                    this.suggestions = [];
+                    this.searchResults = [];
+                    this.relatedPhrases = [];
+                    clearTimeout(this.suggestTimer);
+                    this.suggestTimer = null;
+                    this.abortSuggestionFetch();
+                    this.abortPhraseFetch();
+                    this.activeSearchToken++;
+                    window.history.pushState({}, '', window.location.pathname);
+                },
+
+                onSearchInput() {
+                    clearTimeout(this.suggestTimer);
+                    const rawQuery = this.searchQuery.trim();
+                    const normalized = this.normalizeKey(rawQuery);
+                    if (!normalized) {
+                        this.abortSuggestionFetch();
+                        this.suggestions = [];
+                        return;
+                    }
+                    if (!rawQuery.includes(' ') && normalized.length < 3) {
+                        this.abortSuggestionFetch();
+                        this.suggestions = [];
+                        return;
+                    }
+                    this.suggestTimer = setTimeout(() => {
+                        this.fetchSuggestions(rawQuery);
+                    }, 300);
+                },
+
+                async fetchSuggestions(prefix) {
+                    const controller = new AbortController();
+                    try {
+                        const normalized = this.normalizeKey(prefix);
+                        if (!normalized) {
+                            this.suggestions = [];
+                            return;
+                        }
+
+                        if (!prefix.includes(' ') && normalized.length < 3) {
+                            this.suggestions = [];
+                            return;
+                        }
+
+                        const cached = this.suggestionCache[normalized];
+                        if (cached) {
+                            this.suggestions = this.cloneData(cached);
+                            return;
+                        }
+
+                        this.abortSuggestionFetch();
+                        this.pendingSuggestionController = controller;
+
+                        const url = prefix.includes(' ')
+                            ? `${this.apiBaseURL}/phrases?q=${encodeURIComponent(prefix)}&limit=10`
+                            : `${this.apiBaseURL}/suggest?prefix=${encodeURIComponent(prefix)}&limit=10`;
+
+                        const response = await fetch(url, { signal: controller.signal });
+                        if (!response.ok) {
+                            return;
+                        }
+
+                        const data = await response.json();
+                        if (controller !== this.pendingSuggestionController) {
+                            return;
+                        }
+
+                        const suggestions = data.success && Array.isArray(data.data) ? data.data : [];
+                        this.suggestionCache[normalized] = this.cloneData(suggestions);
+                        if (this.normalizeKey(this.searchQuery) === normalized) {
+                            this.suggestions = this.cloneData(suggestions);
+                        }
+                    } catch (err) {
+                        if (err.name !== 'AbortError') {
+                            console.error('获取建议失败:', err);
+                        }
+                    } finally {
+                        if (controller === this.pendingSuggestionController) {
+                            this.pendingSuggestionController = null;
+                        }
+                    }
+                },
+
+                selectSuggestion(word) {
+                    clearTimeout(this.suggestTimer);
+                    this.searchQuery = word;
+                    this.showSuggestions = false;
+                    this.suggestions = [];
+                    this.abortSuggestionFetch();
+                    this.performSearch();
+                },
+
+                async performSearch() {
+                    clearTimeout(this.suggestTimer);
+                    const rawQuery = this.searchQuery.trim();
+                    const normalized = this.normalizeKey(rawQuery);
+                    if (!normalized) {
+                        return;
+                    }
+
+                    this.loading = true;
+                    this.error = null;
+                    this.currentWord = null;
+                    this.searchResults = [];
+                    this.relatedPhrases = [];
+                    this.hasSearched = true;
+                    this.showSuggestions = false;
+                    this.suggestions = [];
+                    this.abortSuggestionFetch();
+                    window.history.pushState({}, '', `?word=${encodeURIComponent(rawQuery)}`);
+
+                    const token = ++this.activeSearchToken;
+                    this.abortPhraseFetch();
+
+                    try {
+                        const cachedWord = this.getCachedWord(normalized);
+                        if (cachedWord) {
+                            this.setWordResult(cachedWord, normalized, token);
+                            return;
+                        }
+
+                        let response = await fetch(`${this.apiBaseURL}/words/${encodeURIComponent(rawQuery)}`);
+
+                        if (response.status === 404) {
+                            const variantResponse = await fetch(`${this.apiBaseURL}/words/by-variant/${encodeURIComponent(rawQuery)}`);
+                            if (variantResponse.ok) {
+                                const variantData = await variantResponse.json();
+                                if (variantData.success && Array.isArray(variantData.data) && variantData.data.length) {
+                                    this.setWordResult(variantData.data[0], normalized, token);
+                                    return;
+                                }
+                            }
+                        }
+
+                        if (response.ok) {
+                            const data = await response.json();
+                            if (data.success && data.data) {
+                                this.setWordResult(data.data, normalized, token);
+                                return;
+                            }
+                        }
+
+                        const searchResponse = await fetch(`${this.apiBaseURL}/search?q=${encodeURIComponent(rawQuery)}&limit=10`);
+                        if (searchResponse.ok) {
+                            const searchData = await searchResponse.json();
+                            if (token === this.activeSearchToken && searchData.success && Array.isArray(searchData.data)) {
+                                this.searchResults = searchData.data;
+                            }
+                        }
+
+                        if (token === this.activeSearchToken) {
+                            this.error = `未找到 "${rawQuery}"`;
+                            if (this.searchResults.length) {
+                                this.hasSearched = true;
+                            }
+                        }
+                    } catch (err) {
+                        if (err.name !== 'AbortError') {
+                            console.error('搜索失败:', err);
+                        }
+                        if (token === this.activeSearchToken) {
+                            this.error = '网络错误，请检查连接';
+                        }
+                    } finally {
+                        if (token === this.activeSearchToken) {
+                            this.loading = false;
+                        }
+                    }
+                },
+
+                async fetchRelatedPhrases(headword, token = this.activeSearchToken) {
+                    const normalized = this.normalizeKey(headword);
+                    if (!normalized) {
+                        return;
+                    }
+
+                    const cached = this.phraseCache[normalized];
+                    if (cached) {
+                        if (token === this.activeSearchToken) {
+                            this.relatedPhrases = this.cloneData(cached);
+                        }
+                        return;
+                    }
+
+                    const controller = new AbortController();
+                    try {
+                        this.abortPhraseFetch();
+                        this.pendingPhraseController = controller;
+
+                        const response = await fetch(`${this.apiBaseURL}/phrases?q=${encodeURIComponent(headword)}&limit=10`, { signal: controller.signal });
+                        if (!response.ok) {
+                            return;
+                        }
+
+                        const result = await response.json();
+                        if (controller !== this.pendingPhraseController) {
+                            return;
+                        }
+
+                        const phrases = result.success && Array.isArray(result.data) ? result.data : [];
+                        this.phraseCache[normalized] = this.cloneData(phrases);
+                        if (token === this.activeSearchToken) {
+                            this.relatedPhrases = this.cloneData(phrases);
+                        }
+                    } catch (err) {
+                        if (err.name !== 'AbortError') {
+                            console.error('获取相关短语失败:', err);
+                        }
+                    } finally {
+                        if (controller === this.pendingPhraseController) {
+                            this.pendingPhraseController = null;
+                        }
+                    }
+                },
+
+                escapeRegExp(value) {
+                    return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+                },
+
+                formatTranslation(text) {
+                    if (!text) return text;
+                    // 将换行符替换为 "；" 分隔符，让翻译更易读
+                    return text.replace(/\\n|\r?\n/g, '；');
+                },
+
+                highlightWord(text, word) {
+                    if (!text || !word) {
+                        return text;
+                    }
+
+                    const wordsToHighlight = [word];
+
+                    if (this.currentWord && Array.isArray(this.currentWord.variants)) {
+                        this.currentWord.variants.forEach((variant) => {
+                            if (variant && variant.variant_text) {
+                                const variantText = variant.variant_text.trim();
+                                if (variantText && !wordsToHighlight.includes(variantText)) {
+                                    wordsToHighlight.push(variantText);
+                                }
+                            }
+                        });
+                    }
+
+                    if (this.currentWord && this.currentWord.queried_variant) {
+                        const queriedText = this.currentWord.queried_variant.text;
+                        if (queriedText && !wordsToHighlight.includes(queriedText)) {
+                            wordsToHighlight.push(queriedText);
+                        }
+                    }
+
+                    const escapedWords = wordsToHighlight.map((item) => this.escapeRegExp(item));
+                    const pattern = escapedWords.join('|');
+                    if (!pattern) {
+                        return text;
+                    }
+                    const regex = new RegExp(`\\b(${pattern})\\b`, 'gi');
+
+                    return text.replace(regex, '<span class="highlight">$1</span>');
+                },
+
+                getGroupedSenses() {
+                    if (!this.currentWord || !Array.isArray(this.currentWord.senses)) {
+                        return [];
+                    }
+                    const buckets = new Map();
+                    const order = [];
+                    this.currentWord.senses.forEach((sense) => {
+                        const posKey = typeof sense.pos === 'string' && sense.pos.trim() ? sense.pos.toLowerCase() : 'other';
+                        if (!buckets.has(posKey)) {
+                            buckets.set(posKey, []);
+                            order.push(posKey);
+                        }
+                        buckets.get(posKey).push(sense);
+                    });
+                    return order.map((key) => {
+                        const senses = buckets.get(key) || [];
+                        return {
+                            key,
+                            label: this.getPOSDisplayName(key),
+                            countLabel: senses.length > 1 ? `共 ${senses.length} 个义项` : '',
+                            senses
+                        };
+                    });
+                },
+
+                getCEFRLevelText(level) {
+                    const levels = ['', 'A1', 'A2', 'B1', 'B2', 'C1', 'C2'];
+                    return levels[level] || '';
+                },
+
+                getCEFRBadgeClass(level) {
+                    const classes = {
+                        1: 'bg-green-100 text-green-800',
+                        2: 'bg-green-200 text-green-900',
+                        3: 'bg-yellow-100 text-yellow-800',
+                        4: 'bg-orange-100 text-orange-800',
+                        5: 'bg-red-100 text-red-800',
+                        6: 'bg-purple-100 text-purple-800'
+                    };
+                    return classes[level] || 'bg-slate-100 text-slate-600';
+                },
+
+                getOxfordLevelText(level) {
+                    if (level === 1) return 'Oxford 3000';
+                    if (level === 2) return 'Oxford 5000';
+                    return '';
+                },
+
+                getCETLevelText(level) {
+                    if (level === 4 || level === 1) return 'CET-4';
+                    if (level === 6 || level === 2) return 'CET-6';
+                    return level ? 'CET-' + level : '';
+                },
+
+                getAccentLabel(accent) {
+                    const labels = {
+                        british: 'UK',
+                        american: 'US',
+                        australian: 'AU',
+                        newzealand: 'NZ',
+                        canadian: 'CA',
+                        irish: 'IE',
+                        scottish: 'SCT',
+                        indian: 'IN',
+                        southafrican: 'ZA',
+                        unknown: '',
+                        other: ''
+                    };
+                    return labels[accent] || accent.toUpperCase();
+                },
+
+                getPOSDisplayName(pos) {
+                    const abbreviations = {
+                        noun: '名词',
+                        verb: '动词',
+                        adjective: '形容词',
+                        adverb: '副词',
+                        pronoun: '代词',
+                        preposition: '介词',
+                        conjunction: '连词',
+                        interjection: '感叹词',
+                        determiner: '限定词',
+                        numeral: '数词',
+                        article: '冠词',
+                        auxiliary: '助动词',
+                        auxiliary_verb: '助动词',
+                        particle: '小品词',
+                        phrase: '短语',
+                        idiom: '习语',
+                        abbreviation: '缩写',
+                        prefix: '前缀',
+                        suffix: '后缀',
+                        phrasal_verb: '短语动词',
+                        'phrasal verb': '短语动词',
+                        other: '其他'
+                    };
+                    if (!pos) {
+                        return '其他';
+                    }
+                    const normalized = pos.toLowerCase();
+                    return abbreviations[normalized] || abbreviations[pos] || pos;
+                },
+
+                getValidVariants() {
+                    if (!this.currentWord || !Array.isArray(this.currentWord.variants)) {
+                        return [];
+                    }
+                    return this.currentWord.variants.filter((variant) => 
+                        variant && variant.kind === 'form' && variant.form_type && variant.form_type.trim() !== ''
+                    );
+                },
+
+                getAliasVariants() {
+                    if (!this.currentWord || !Array.isArray(this.currentWord.variants)) {
+                        return [];
+                    }
+                    return this.currentWord.variants.filter((variant) => 
+                        variant && (variant.kind === 'alias' || (variant.kind === 'form' && (!variant.form_type || variant.form_type.trim() === '')))
+                    );
+                },
+
+                getFormTypeLabel(formType) {
+                    const labels = {
+                        plural: '复数',
+                        comparative: '比较级',
+                        superlative: '最高级',
+                        past: '过去式',
+                        past_participle: '过去分词',
+                        present_3rd: '第三人称单数',
+                        present_participle: '现在分词',
+                        gerund: '动名词'
+                    };
+                    if (!formType) {
+                        return formType;
+                    }
+                    const normalized = formType.toLowerCase().replace(/\s+/g, '_');
+                    return labels[normalized] || formType;
+                },
+
+                getWordDataSources() {
+                    if (!this.currentWord) {
+                        return [];
+                    }
+
+                    const sources = [
+                        {
+                            name: 'Wiktionary',
+                            available: this.currentWord.senses && this.currentWord.senses.length > 0
+                        },
+                        {
+                            name: 'ECDICT',
+                            available: this.currentWord.translation_zh && this.currentWord.translation_zh.trim() !== ''
+                        },
+                        {
+                            name: 'CEFR-J',
+                            available: this.currentWord.cefr_source === 'cefrj' || this.currentWord.cefr_source === 'both'
+                        },
+                        {
+                            name: 'CET',
+                            available: this.currentWord.cet_level > 0
+                        },
+                        {
+                            name: 'Oxford',
+                            available: this.currentWord.cefr_source === 'oxford' || this.currentWord.cefr_source === 'both' || this.currentWord.oxford_level > 0
+                        },
+                        {
+                            name: 'FrequencyWords',
+                            available: this.currentWord.frequency_rank > 0
+                        }
+                    ];
+
+                    return sources;
+                },
+
+                getTotalExamples() {
+                    if (!this.currentWord || !Array.isArray(this.currentWord.senses)) {
+                        return 0;
+                    }
+                    return this.currentWord.senses.reduce((total, sense) => {
+                        return total + (Array.isArray(sense.examples) ? sense.examples.length : 0);
+                    }, 0);
+                },
+
+                normalizeKey(value) {
+                    return (value || '').trim().toLowerCase();
+                },
+
+                cloneData(data) {
+                    if (data === undefined || data === null) {
+                        return data;
+                    }
+                    try {
+                        return JSON.parse(JSON.stringify(data));
+                    } catch (_err) {
+                        return data;
+                    }
+                },
+
+                getCachedWord(key) {
+                    const cached = this.wordCache[key];
+                    return cached ? this.cloneData(cached) : null;
+                },
+
+                setWordResult(wordData, normalizedKey, token) {
+                    if (typeof token === 'number' && token !== this.activeSearchToken) {
+                        return;
+                    }
+                    const result = this.cloneData(wordData);
+                    this.currentWord = result;
+
+                    if (normalizedKey) {
+                        this.wordCache[normalizedKey] = this.cloneData(result);
+                    }
+                    if (result?.headword) {
+                        const headwordKey = this.normalizeKey(result.headword);
+                        if (headwordKey) {
+                            this.wordCache[headwordKey] = this.cloneData(result);
+                        }
+                    }
+
+                    this.error = null;
+                    this.searchResults = [];
+                    if (result?.headword && !result.headword.includes(' ')) {
+                        this.fetchRelatedPhrases(result.headword, token);
+                    } else {
+                        this.relatedPhrases = [];
+                    }
+                },
+
+                abortSuggestionFetch() {
+                    if (this.pendingSuggestionController) {
+                        this.pendingSuggestionController.abort();
+                        this.pendingSuggestionController = null;
+                    }
+                },
+
+                abortPhraseFetch() {
+                    if (this.pendingPhraseController) {
+                        this.pendingPhraseController.abort();
+                        this.pendingPhraseController = null;
+                    }
+                }
+            };
+        }
+    </script>
+</body>
+</html>
