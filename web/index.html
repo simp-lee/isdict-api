@@ -82,14 +82,14 @@
         <div class="max-w-5xl mx-auto px-3 sm:px-4 md:px-6 lg:px-8">
             <div class="flex flex-col items-center gap-6 py-16" x-show="!hasSearched" x-transition>
                 <button class="flex flex-col items-center text-center transition hover:opacity-80" @click="resetToHome()">
-                    <span class="text-4xl font-semibold text-red-600">易思词典</span>
+                    <h1 class="text-4xl font-semibold text-red-600">易思词典</h1>
                     <span class="mt-1 text-sm text-slate-400">isdict.com</span>
-                    <span class="mt-2 text-sm text-slate-500">六大数据源 · 多维标注 · 智能检索</span>
+                    <p class="mt-2 text-sm text-slate-500">六大数据源 · 多维标注 · 智能检索</p>
                 </button>
                 <div class="relative w-full max-w-2xl rounded-3xl border border-slate-200/80 bg-white px-6 py-5 shadow-lg shadow-slate-200/60" x-data="{ focused: false }">
-                    <div class="flex items-center gap-4">
+                    <form role="search" @submit.prevent="performSearch()" class="flex items-center gap-4">
                         <input
-                            type="text"
+                            type="search"
                             class="w-full border-0 bg-transparent text-lg placeholder:text-slate-400 focus:outline-none focus:ring-0"
                             :placeholder="window.innerWidth < 640 ? '搜索单词/短语/变体' : '搜索 71.5万 词条 · 支持单词/短语/变体查询'"
                             x-model="searchQuery"
@@ -98,11 +98,14 @@
                             @blur="setTimeout(() => { focused = false; showSuggestions = false; }, 150)"
                             @keydown.enter.prevent="performSearch()"
                             @keydown.escape="showSuggestions = false"
+                            aria-label="搜索英文单词、短语或词形变体"
+                            autocomplete="off"
+                            spellcheck="false"
                         />
                         <button
+                            type="submit"
                             class="flex h-12 w-12 flex-shrink-0 items-center justify-center rounded-full bg-red-500 text-white transition hover:bg-red-600"
                             @mousedown.prevent
-                            @click="performSearch()"
                             aria-label="搜索"
                         >
                             <svg class="h-5 w-5" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6">
@@ -110,7 +113,7 @@
                                 <path d="M13 13l4 4" stroke-linecap="round"></path>
                             </svg>
                         </button>
-                    </div>
+                    </form>
                     <div
                         x-show="showSuggestions && suggestions.length > 0"
                         x-cloak
@@ -140,11 +143,12 @@
                 </div>
                 <div class="flex flex-wrap justify-center gap-2" x-show="!currentWord && !loading">
                     <template x-for="item in [...exampleWords, ...examplePhrases]" :key="item">
-                        <button
+                        <a
+                            :href="`?word=${encodeURIComponent(item)}`"
+                            @click.prevent="searchQuery = item; performSearch()"
                             class="rounded-md border border-slate-200 bg-white px-3 py-1.5 text-sm text-slate-600 transition hover:bg-slate-100"
-                            @click="searchQuery = item; performSearch()"
                             x-text="item"
-                        ></button>
+                        ></a>
                     </template>
                 </div>
             </div>
@@ -156,28 +160,33 @@
                         <span class="hidden md:inline text-sm text-slate-500">六大数据源整合词典</span>
                     </button>
                     <div class="relative flex-1" x-data="{ focused: false }">
-                        <input
-                            type="text"
-                            class="w-full border-0 border-b border-slate-300 bg-transparent py-2 pr-11 text-lg placeholder:text-slate-400 focus:border-red-500 focus:outline-none focus:ring-0 transition"
-                            placeholder="搜索单词或短语"
-                            x-model="searchQuery"
-                            @input="onSearchInput()"
-                            @focus="focused = true; showSuggestions = true"
-                            @blur="setTimeout(() => { focused = false; showSuggestions = false; }, 150)"
-                            @keydown.enter.prevent="performSearch()"
-                            @keydown.escape="showSuggestions = false"
-                        />
-                        <button
-                            class="absolute inset-y-0 right-0 flex items-center justify-center rounded-md px-2 text-slate-400 transition hover:text-red-600"
-                            @mousedown.prevent
-                            @click="performSearch()"
-                            aria-label="搜索"
-                        >
-                            <svg class="h-5 w-5" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6">
-                                <circle cx="9" cy="9" r="5.5"></circle>
-                                <path d="M13 13l4 4" stroke-linecap="round"></path>
-                            </svg>
-                        </button>
+                        <form role="search" @submit.prevent="performSearch()">
+                            <input
+                                type="search"
+                                class="w-full border-0 border-b border-slate-300 bg-transparent py-2 pr-11 text-lg placeholder:text-slate-400 focus:border-red-500 focus:outline-none focus:ring-0 transition"
+                                placeholder="搜索单词或短语"
+                                x-model="searchQuery"
+                                @input="onSearchInput()"
+                                @focus="focused = true; showSuggestions = true"
+                                @blur="setTimeout(() => { focused = false; showSuggestions = false; }, 150)"
+                                @keydown.enter.prevent="performSearch()"
+                                @keydown.escape="showSuggestions = false"
+                                aria-label="搜索英文单词或短语"
+                                autocomplete="off"
+                                spellcheck="false"
+                            />
+                            <button
+                                type="submit"
+                                class="absolute inset-y-0 right-0 flex items-center justify-center rounded-md px-2 text-slate-400 transition hover:text-red-600"
+                                @mousedown.prevent
+                                aria-label="搜索"
+                            >
+                                <svg class="h-5 w-5" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6">
+                                    <circle cx="9" cy="9" r="5.5"></circle>
+                                    <path d="M13 13l4 4" stroke-linecap="round"></path>
+                                </svg>
+                            </button>
+                        </form>
 
                         <div
                             x-show="showSuggestions && suggestions.length > 0"
@@ -344,11 +353,12 @@
                     <p class="text-sm text-rose-500/80">也许你想找:</p>
                     <div class="mt-3 flex flex-wrap justify-center gap-2">
                         <template x-for="result in searchResults.slice(0, 5)" :key="result.headword">
-                            <button
+                            <a
+                                :href="`?word=${encodeURIComponent(result.headword)}`"
+                                @click.prevent="selectSuggestion(result.headword)"
                                 class="rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm text-slate-600 transition hover:border-rose-300 hover:bg-rose-50 hover:text-red-600"
-                                @click="selectSuggestion(result.headword)"
                                 x-text="result.headword"
-                            ></button>
+                            ></a>
                         </template>
                     </div>
                 </div>
@@ -392,13 +402,14 @@
                 <h3 class="text-sm font-semibold tracking-wide text-slate-700">相关短语</h3>
                 <div class="flex flex-wrap gap-2">
                     <template x-for="phrase in relatedPhrases" :key="phrase.headword">
-                        <button
+                        <a
+                            :href="`?word=${encodeURIComponent(phrase.headword)}`"
+                            @click.prevent="selectSuggestion(phrase.headword)"
                             class="inline-flex items-baseline gap-2 rounded border border-slate-200 bg-slate-50 px-3 py-1.5 text-sm text-slate-600 transition hover:border-rose-200 hover:bg-rose-500/5"
-                            @click="selectSuggestion(phrase.headword)"
                         >
                             <span class="font-medium" x-text="phrase.headword"></span>
                             <span x-show="phrase.translation_zh" class="text-xs text-teal-600" x-text="formatTranslation(phrase.translation_zh)"></span>
-                        </button>
+                        </a>
                     </template>
                 </div>
             </section>
@@ -554,7 +565,7 @@
                     <div class="flex-1 space-y-2">
                         <h5 class="text-sm font-semibold text-slate-900">许可证说明</h5>
                         <div class="space-y-1.5 text-xs leading-relaxed text-slate-600">
-                            <p><strong class="text-slate-700">项目代码：</strong>采用 MIT 开源协议，可自由使用、修改和分发。访问 <a href="https://github.com/lzzsG/isdict" target="_blank" class="text-blue-600 hover:underline">GitHub 仓库</a> 获取源码。</p>
+                            <p><strong class="text-slate-700">项目代码：</strong>采用 MIT 开源协议，可自由使用、修改和分发。访问 <a href="https://github.com/simp-lee/isdict-api" target="_blank" class="text-blue-600 hover:underline">GitHub 仓库</a> 获取源码。</p>
                             <p><strong class="text-slate-700">数据使用：</strong>核心数据源自 Wiktionary、FrequencyWords (CC BY-SA 4.0)；ECDICT (MIT)；CEFR-J (A1-B2 免费商业使用 + C1-C2 CC BY-SA 4.0)；Oxford (教育研究使用)。</p>
                             <p><strong class="text-slate-700">API 服务：</strong>本站提供查询 API 服务不构成数据再分发，符合所有数据源使用条款，可合法商业化。</p>
                         </div>
@@ -888,7 +899,7 @@
                     <h5 class="text-sm font-semibold text-slate-900">需要更多接口信息？</h5>
                     <p class="mt-1 text-xs text-slate-500">查看完整 API 文档，了解所有 9 个端点的详细参数、响应格式和错误码</p>
                 </div>
-                <a href="https://github.com/lzzsG/isdict/blob/main/cmd/api/README.md" target="_blank" class="flex-shrink-0 inline-flex items-center gap-2 rounded-lg bg-slate-900 px-5 py-2.5 text-sm font-medium text-white transition hover:bg-slate-800">
+                <a href="https://github.com/simp-lee/isdict-api/blob/main/README.zh-CN.md" target="_blank" class="flex-shrink-0 inline-flex items-center gap-2 rounded-lg bg-slate-900 px-5 py-2.5 text-sm font-medium text-white transition hover:bg-slate-800">
                     <svg class="h-4 w-4" fill="currentColor" viewBox="0 0 24 24">
                         <path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"/>
                     </svg>
@@ -1155,7 +1166,7 @@
                         <span>·</span>
                         <span>六大数据源</span>
                         <span>·</span>
-                        <a href="https://github.com/lzzsG/isdict" target="_blank" class="text-red-600 hover:underline">开源项目</a>
+                        <a href="https://github.com/simp-lee/isdict-api" target="_blank" class="text-red-600 hover:underline">开源项目</a>
                     </div>
                 </div>
             </div>
@@ -1188,7 +1199,7 @@
                         </div>
                         <ul class="mt-4 space-y-2 text-xs text-slate-600">
                             <li>
-                                <a href="https://github.com/lzzsG/isdict" target="_blank" class="group inline-flex items-center justify-between gap-2 w-full rounded-lg border border-transparent px-3 py-2 transition hover:border-red-200 hover:bg-rose-50">
+                                <a href="https://github.com/simp-lee/isdict-api" target="_blank" class="group inline-flex items-center justify-between gap-2 w-full rounded-lg border border-transparent px-3 py-2 transition hover:border-red-200 hover:bg-rose-50">
                                     <span class="group-hover:text-red-600">GitHub 仓库</span>
                                     <svg class="h-3.5 w-3.5 text-slate-400 group-hover:text-red-500" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
                                         <path d="M7 5h8v8" />
@@ -1197,7 +1208,7 @@
                                 </a>
                             </li>
                             <li>
-                                <a href="https://github.com/lzzsG/isdict/blob/main/README.md" target="_blank" class="group inline-flex items-center justify-between gap-2 w-full rounded-lg border border-transparent px-3 py-2 transition hover:border-red-200 hover:bg-rose-50">
+                                <a href="https://github.com/simp-lee/isdict-api/blob/main/README.zh-CN.md" target="_blank" class="group inline-flex items-center justify-between gap-2 w-full rounded-lg border border-transparent px-3 py-2 transition hover:border-red-200 hover:bg-rose-50">
                                     <span class="group-hover:text-red-600">项目文档</span>
                                     <svg class="h-3.5 w-3.5 text-slate-400 group-hover:text-red-500" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
                                         <path d="M7 5h8v8" />
@@ -1206,17 +1217,8 @@
                                 </a>
                             </li>
                             <li>
-                                <a href="https://github.com/lzzsG/isdict/blob/main/cmd/api/README.md" target="_blank" class="group inline-flex items-center justify-between gap-2 w-full rounded-lg border border-transparent px-3 py-2 transition hover:border-red-200 hover:bg-rose-50">
+                                <a href="https://github.com/simp-lee/isdict-api/blob/main/api.zh-CN.md" target="_blank" class="group inline-flex items-center justify-between gap-2 w-full rounded-lg border border-transparent px-3 py-2 transition hover:border-red-200 hover:bg-rose-50">
                                     <span class="group-hover:text-red-600">API 文档</span>
-                                    <svg class="h-3.5 w-3.5 text-slate-400 group-hover:text-red-500" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
-                                        <path d="M7 5h8v8" />
-                                        <path d="M15 5L5 15" />
-                                    </svg>
-                                </a>
-                            </li>
-                            <li>
-                                <a href="https://github.com/lzzsG/isdict/blob/main/docs/pipeline_guide.md" target="_blank" class="group inline-flex items-center justify-between gap-2 w-full rounded-lg border border-transparent px-3 py-2 transition hover:border-red-200 hover:bg-rose-50">
-                                    <span class="group-hover:text-red-600">数据管线</span>
                                     <svg class="h-3.5 w-3.5 text-slate-400 group-hover:text-red-500" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
                                         <path d="M7 5h8v8" />
                                         <path d="M15 5L5 15" />
@@ -1276,8 +1278,7 @@
                         <span>开源项目 · 持续演进</span>
                     </div>
                     <div class="text-xs text-slate-500">
-                        © 2025 易思词典 · 代码开源 MIT 协议 ·  
-                        <a href="https://github.com/lzzsG/isdict/blob/main/data/data_sources.md" target="_blank" class="text-red-600 hover:underline">数据源遵循各自许可</a>
+                        © 2025 易思词典 · 代码开源 MIT 协议 · 数据源保持各自原始授权
                     </div>
                 </div>
             </div>
@@ -1334,6 +1335,8 @@
                     this.abortPhraseFetch();
                     this.activeSearchToken++;
                     window.history.pushState({}, '', window.location.pathname);
+                    
+                    document.title = '易思词典';
                 },
 
                 onSearchInput() {
@@ -1803,6 +1806,11 @@
                         if (headwordKey) {
                             this.wordCache[headwordKey] = this.cloneData(result);
                         }
+                        
+                        const headword = result.headword;
+                        const translation = result.translation_zh || '';
+                        const formattedTranslation = this.formatTranslation(translation);
+                        document.title = `${headword} - 易思词典${formattedTranslation ? ' | ' + formattedTranslation : ''}`;
                     }
 
                     this.error = null;

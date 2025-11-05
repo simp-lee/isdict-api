@@ -84,7 +84,7 @@ func test2ResponseCaching() {
 	resp1, err := http.Get(endpoint)
 	duration1 := time.Since(start1)
 	if err == nil {
-		io.Copy(io.Discard, resp1.Body)
+		_, _ = io.Copy(io.Discard, resp1.Body)
 		resp1.Body.Close()
 	}
 
@@ -95,7 +95,7 @@ func test2ResponseCaching() {
 	resp2, err := http.Get(endpoint)
 	duration2 := time.Since(start2)
 	if err == nil {
-		io.Copy(io.Discard, resp2.Body)
+		_, _ = io.Copy(io.Discard, resp2.Body)
 		resp2.Body.Close()
 	}
 
@@ -157,7 +157,7 @@ func test4BurstRateLimiting() {
 			errors.Add(1)
 		}
 
-		io.Copy(io.Discard, resp.Body)
+		_, _ = io.Copy(io.Discard, resp.Body)
 		resp.Body.Close()
 
 		if (i+1)%50 == 0 {
@@ -189,7 +189,7 @@ func test5POSTNotCached() {
 	resp1, err := http.Post(endpoint, "application/json", nil)
 	duration1 := time.Since(start1)
 	if err == nil {
-		io.Copy(io.Discard, resp1.Body)
+		_, _ = io.Copy(io.Discard, resp1.Body)
 		resp1.Body.Close()
 	}
 
@@ -200,7 +200,7 @@ func test5POSTNotCached() {
 	resp2, err := http.Post(endpoint, "application/json", nil)
 	duration2 := time.Since(start2)
 	if err == nil {
-		io.Copy(io.Discard, resp2.Body)
+		_, _ = io.Copy(io.Discard, resp2.Body)
 		resp2.Body.Close()
 	}
 
@@ -231,7 +231,7 @@ func test6RequestIDUniqueness() {
 		}
 		requestID := resp.Header.Get("X-Request-Id")
 		requestIDs[requestID] = true
-		io.Copy(io.Discard, resp.Body)
+		_, _ = io.Copy(io.Discard, resp.Body)
 		resp.Body.Close()
 	}
 
@@ -268,7 +268,7 @@ func test7StaticFilesSkipRateLimit() {
 			successCount.Add(1)
 		}
 
-		io.Copy(io.Discard, resp.Body)
+		_, _ = io.Copy(io.Discard, resp.Body)
 		resp.Body.Close()
 	}
 
@@ -299,7 +299,7 @@ func test8CacheQueryStringSensitivity() {
 		resp1, _ := http.Get(endpoint)
 		duration1 := time.Since(start1)
 		if resp1 != nil {
-			io.Copy(io.Discard, resp1.Body)
+			_, _ = io.Copy(io.Discard, resp1.Body)
 			resp1.Body.Close()
 		}
 
@@ -309,7 +309,7 @@ func test8CacheQueryStringSensitivity() {
 		resp2, _ := http.Get(endpoint)
 		duration2 := time.Since(start2)
 		if resp2 != nil {
-			io.Copy(io.Discard, resp2.Body)
+			_, _ = io.Copy(io.Discard, resp2.Body)
 			resp2.Body.Close()
 		}
 
@@ -347,7 +347,7 @@ func test9ConcurrentRequests() {
 				errorCount.Add(1)
 			}
 
-			io.Copy(io.Discard, resp.Body)
+			_, _ = io.Copy(io.Discard, resp.Body)
 		}(i)
 	}
 

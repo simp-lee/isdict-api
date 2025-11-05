@@ -85,7 +85,7 @@ func testCache() (bool, string) {
 	resp1, err := http.Get(endpoint)
 	dur1 := time.Since(start1)
 	if err == nil {
-		io.Copy(io.Discard, resp1.Body)
+		_, _ = io.Copy(io.Discard, resp1.Body)
 		resp1.Body.Close()
 	}
 
@@ -95,7 +95,7 @@ func testCache() (bool, string) {
 	resp2, err := http.Get(endpoint)
 	dur2 := time.Since(start2)
 	if err == nil {
-		io.Copy(io.Discard, resp2.Body)
+		_, _ = io.Copy(io.Discard, resp2.Body)
 		resp2.Body.Close()
 	}
 
@@ -141,7 +141,7 @@ func testRateLimitProtection() (bool, string) {
 					return
 				}
 				statusCode := resp.StatusCode
-				io.Copy(io.Discard, resp.Body)
+				_, _ = io.Copy(io.Discard, resp.Body)
 				resp.Body.Close()
 				results <- statusCode
 			}()
@@ -169,7 +169,7 @@ func testPOSTNotCached() (bool, string) {
 	resp1, _ := http.Post(endpoint, "application/json", nil)
 	dur1 := time.Since(start1)
 	if resp1 != nil {
-		io.Copy(io.Discard, resp1.Body)
+		_, _ = io.Copy(io.Discard, resp1.Body)
 		resp1.Body.Close()
 	}
 
@@ -179,7 +179,7 @@ func testPOSTNotCached() (bool, string) {
 	resp2, _ := http.Post(endpoint, "application/json", nil)
 	dur2 := time.Since(start2)
 	if resp2 != nil {
-		io.Copy(io.Discard, resp2.Body)
+		_, _ = io.Copy(io.Discard, resp2.Body)
 		resp2.Body.Close()
 	}
 
@@ -205,7 +205,7 @@ func testStaticSkipRateLimit() (bool, string) {
 		if resp.StatusCode == 429 {
 			rateLimited++
 		}
-		io.Copy(io.Discard, resp.Body)
+		_, _ = io.Copy(io.Discard, resp.Body)
 		resp.Body.Close()
 	}
 
@@ -221,7 +221,7 @@ func testConcurrent() (bool, string) {
 		go func() {
 			resp, err := http.Get(baseURL + "/health")
 			if err == nil {
-				io.Copy(io.Discard, resp.Body)
+				_, _ = io.Copy(io.Discard, resp.Body)
 				resp.Body.Close()
 				done <- true
 			} else {

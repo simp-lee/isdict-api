@@ -9,13 +9,18 @@
 
 基于 PostgreSQL 的英汉词典 API，使用共享的 [isdict-commons](https://github.com/simp-lee/isdict-commons) 模型。
 
-## 概述
+## 核心特性
 
-- 整合 Wiktionary、CEFR、Oxford、CET、ECDICT 和 WordFreq 数据集于单一 API
-- 返回发音、双语释义、变体、词频统计和学习标签
-- 内置轻量级 Alpine.js/Tailwind 网页控制台，支持快速查询
-- 生产级中间件（限流、CORS、缓存、请求 ID 追踪和超时控制），详见 [中间件功能](#中间件功能)
-- 开箱即用的健康检查、优雅关闭、连接池和请求限制
+易思词典（IsDict）整合六大权威词典数据源（Wiktionary、Oxford、CEFR-J、CET、ECDICT、WordFreq），提供：
+
+- **完整的词典数据**：71.5万+词条、发音、释义、例句、词形变化
+- **多口音支持**：英美澳加新等10种口音的IPA音标，16万+发音数据
+- **双语支持**：97.6万英文义项 + 26万中文翻译，58.4万真实例句中英对照
+- **强大的搜索和查询功能**：前缀自动补全、短语智能匹配、88.8万词形变体反查
+- **多维等级标注**：CEFR A1-C2、CET 四六级、Oxford 3000/5000、柯林斯星级、词频 TOP 50K
+- **生产级中间件**：限流、CORS、缓存、请求 ID 追踪和超时控制，详见 [中间件功能](#中间件功能)
+- **开箱即用**：健康检查、优雅关闭、连接池和请求限制
+- **内置网页控制台**：轻量级 Alpine.js/Tailwind 单页应用，支持快速查询
 
 完整 API 文档请查看 [api.zh-CN.md](api.zh-CN.md)。
 

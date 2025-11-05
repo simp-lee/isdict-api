@@ -9,13 +9,18 @@ English | [中文](README.zh-CN.md)
 
 English-Chinese dictionary API backed by PostgreSQL and the shared [isdict-commons](https://github.com/simp-lee/isdict-commons) models.
 
-## Overview
+## Key Features
 
-- Consolidates Wiktionary, CEFR, Oxford, CET, ECDICT, and WordFreq datasets into a single API
-- Returns pronunciations, bilingual definitions, variants, frequency stats, and learning tags
-- Ships with a lightweight Alpine.js/Tailwind web console for quick lookups
-- Production-ready middleware (rate limiting, CORS, caching, request ID tracking, and timeouts)—see [Middleware Features](#middleware-features) for details
-- Provides health checks, graceful shutdown, connection pooling, and request limits out of the box
+IsDict integrates six authoritative dictionary data sources (Wiktionary, Oxford, CEFR-J, CET, ECDICT, WordFreq), offering:
+
+- **Comprehensive Dictionary Data**: 715,000+ entries with pronunciations, definitions, examples, and word forms
+- **Multi-Accent Support**: IPA phonetics for 10 accents (British, American, Australian, Canadian, New Zealand, etc.), 160,000+ pronunciation records
+- **Bilingual Support**: 976,000 English senses + 260,000 Chinese translations, 584,000 authentic bilingual example sentences
+- **Powerful Search & Query**: Prefix autocomplete, intelligent phrase matching, 888,000 word form variants lookup
+- **Multi-Dimensional Level Tags**: CEFR A1-C2, CET-4/6, Oxford 3000/5000, Collins stars, word frequency TOP 50K
+- **Production-Ready Middleware**: Rate limiting, CORS, caching, request ID tracking, and timeouts—see [Middleware Features](#middleware-features) for details
+- **Out-of-the-Box**: Health checks, graceful shutdown, connection pooling, and request limits
+- **Built-in Web Console**: Lightweight Alpine.js/Tailwind single-page app for quick lookups
 
 See [api.md](api.md) for the full API surface.
 

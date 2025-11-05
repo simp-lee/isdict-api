@@ -75,7 +75,7 @@ func testExtremeBurst() {
 				errors.Add(1)
 			}
 
-			io.Copy(io.Discard, resp.Body)
+			_, _ = io.Copy(io.Discard, resp.Body)
 		}(i)
 	}
 
@@ -140,7 +140,7 @@ func testSustainedLoad() {
 						rateLimited.Add(1)
 					}
 
-					io.Copy(io.Discard, resp.Body)
+					_, _ = io.Copy(io.Discard, resp.Body)
 					resp.Body.Close()
 
 					time.Sleep(10 * time.Millisecond) // Small delay between requests
@@ -204,7 +204,7 @@ func testMixedConcurrent() {
 				errors.Add(1)
 			}
 
-			io.Copy(io.Discard, resp.Body)
+			_, _ = io.Copy(io.Discard, resp.Body)
 		}(i)
 	}
 
@@ -231,7 +231,7 @@ func testMixedConcurrent() {
 				errors.Add(1)
 			}
 
-			io.Copy(io.Discard, resp.Body)
+			_, _ = io.Copy(io.Discard, resp.Body)
 		}(i)
 	}
 
