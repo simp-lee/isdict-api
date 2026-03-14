@@ -1,10 +1,13 @@
 package service
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"strings"
 
+	"github.com/simp-lee/isdict-api/internal/api/contracts"
+	"github.com/simp-lee/isdict-api/internal/api/queryvalidation"
 	"github.com/simp-lee/isdict-api/internal/api/repository"
 	"github.com/simp-lee/isdict-api/internal/config"
 	"github.com/simp-lee/isdict-commons/model"
@@ -20,6 +23,8 @@ type WordService struct {
 // Domain-level errors produced by the service layer
 var (
 	ErrBatchLimitExceeded = errors.New("batch limit exceeded")
+	ErrWordNotFound       = contracts.ErrWordNotFound
+	ErrVariantNotFound    = contracts.ErrVariantNotFound
 )
 
 const (
@@ -27,6 +32,19 @@ const (
 	langEnglish = "en"
 	langChinese = "zh"
 )
+
+type batchCandidate struct {
+	word    *model.Word
+	variant *model.WordVariant
+}
+
+type batchCandidateIndex map[string][]batchCandidate
+
+type batchIncludeOptions struct {
+	variants       bool
+	pronunciations bool
+	senses         bool
+}
 
 // NewWordService creates a new word service instance
 func NewWordService(repo repository.WordRepository, cfg *config.Config) *WordService {
@@ -37,17 +55,17 @@ func NewWordService(repo repository.WordRepository, cfg *config.Config) *WordSer
 }
 
 // GetWordByHeadword retrieves a word by headword
-func (s *WordService) GetWordByHeadword(headword string, accentCode *int, includeVariants, includePronunciations, includeSenses bool) (*model.WordResponse, error) {
-	word, variant, err := s.repo.GetWordByHeadword(headword, includeVariants, includePronunciations, includeSenses)
+func (s *WordService) GetWordByHeadword(ctx context.Context, headword string, accentCode *int, includeVariants, includePronunciations, includeSenses bool) (*model.WordResponse, error) {
+	word, variant, err := s.repo.GetWordByHeadword(ctx, headword, includeVariants, includePronunciations, includeSenses)
 	if err != nil {
-		return nil, err
+		return nil, translateWordNotFound(err)
 	}
 
 	return s.convertToWordResponse(word, variant, accentCode, includeVariants, includePronunciations, includeSenses), nil
 }
 
 // GetWordsByVariant finds words by variant text
-func (s *WordService) GetWordsByVariant(variant string, kindStr *string, includePronunciations, includeSenses bool) ([]model.VariantReverseResponse, error) {
+func (s *WordService) GetWordsByVariant(ctx context.Context, variant string, kindStr *string, includePronunciations, includeSenses bool) ([]model.VariantReverseResponse, error) {
 	var kind *int
 	if kindStr != nil {
 		// kindStr is already lowercase and validated by the handler layer
@@ -61,16 +79,13 @@ func (s *WordService) GetWordsByVariant(variant string, kindStr *string, include
 		}
 	}
 
-	words, variants, err := s.repo.GetWordsByVariant(variant, kind)
+	words, variants, err := s.repo.GetWordsByVariant(ctx, variant, kind, includePronunciations, includeSenses)
 	if err != nil {
-		if errors.Is(err, repository.ErrVariantNotFound) {
-			return nil, repository.ErrVariantNotFound
-		}
-		return nil, err
+		return nil, translateVariantNotFound(err)
 	}
 
 	// Create a map for quick variant lookup - support multiple variants per word
-	variantMap := make(map[uint][]repository.WordVariant)
+	variantMap := make(map[uint][]model.WordVariant)
 	for i := range variants {
 		wordID := variants[i].WordID
 		variantMap[wordID] = append(variantMap[wordID], variants[i])
@@ -82,7 +97,7 @@ func (s *WordService) GetWordsByVariant(variant string, kindStr *string, include
 			ID:       word.ID,
 			Headword: word.Headword,
 			WordAnnotations: model.WordAnnotations{
-				CEFRLevel:      word.CEFRLevel,
+				CEFRLevel:      toAPICEFRLevel(word.CEFRLevel),
 				CEFRSource:     word.CEFRSource,
 				CETLevel:       toAPICETLevel(word.CETLevel),
 				OxfordLevel:    word.OxfordLevel,
@@ -117,121 +132,25 @@ func (s *WordService) GetWordsByVariant(variant string, kindStr *string, include
 }
 
 // GetWordsBatch retrieves multiple words with automatic fallback to variants
-func (s *WordService) GetWordsBatch(req *model.BatchRequest) ([]model.WordResponse, *model.MetaInfo, error) {
+func (s *WordService) GetWordsBatch(ctx context.Context, req *model.BatchRequest) ([]model.WordResponse, *model.MetaInfo, error) {
+	includeOptions, err := s.prepareBatchRequest(req)
+	if err != nil {
+		return nil, nil, err
+	}
 	if len(req.Words) == 0 {
 		return []model.WordResponse{}, nil, nil
 	}
 
-	if len(req.Words) > s.config.APIBatchMaxSize {
-		return nil, nil, fmt.Errorf("%w: maximum %d words per request", ErrBatchLimitExceeded, s.config.APIBatchMaxSize)
-	}
-
-	// Set defaults
-	includeVariants := true
-	includePronunciations := true
-	includeSenses := true
-
-	if req.IncludeVariants != nil {
-		includeVariants = *req.IncludeVariants
-	}
-	if req.IncludePronunciations != nil {
-		includePronunciations = *req.IncludePronunciations
-	}
-	if req.IncludeSenses != nil {
-		includeSenses = *req.IncludeSenses
-	}
-
-	// ============ Step 1: Batch query main words table ============
-	words, err := s.repo.GetWordsByHeadwords(req.Words, includeVariants, includePronunciations, includeSenses)
+	words, err := s.repo.GetWordsByHeadwords(ctx, req.Words, includeOptions.variants, includeOptions.pronunciations, includeOptions.senses)
 	if err != nil {
 		return nil, nil, err
 	}
-
-	// ============ Step 2: Build index using normalized form ============
-	wordGroups := make(map[string][]*repository.Word, len(words))
-	addCandidate := func(word *repository.Word, alias string) {
-		if word == nil {
-			return
-		}
-
-		keys := []string{textutil.ToNormalized(word.Headword)}
-		if trimmed := strings.TrimSpace(alias); trimmed != "" {
-			aliasKey := textutil.ToNormalized(trimmed)
-			if aliasKey != "" && aliasKey != keys[0] {
-				keys = append(keys, aliasKey)
-			}
-		}
-
-		for _, key := range keys {
-			group := wordGroups[key]
-			duplicate := false
-			for _, existing := range group {
-				if existing.ID == word.ID {
-					duplicate = true
-					break
-				}
-			}
-			if !duplicate {
-				wordGroups[key] = append(group, word)
-			}
-		}
+	index := buildBatchCandidateIndex(words)
+	if err := s.fillBatchVariantFallback(ctx, req.Words, index, includeOptions); err != nil {
+		return nil, nil, err
 	}
 
-	for i := range words {
-		addCandidate(&words[i], "")
-	}
-
-	selectWord := func(input string) (*repository.Word, bool) {
-		key := textutil.ToNormalized(input)
-		candidates, ok := wordGroups[key]
-		if !ok || len(candidates) == 0 {
-			return nil, false
-		}
-		for _, candidate := range candidates {
-			if candidate.Headword == input {
-				return candidate, true
-			}
-		}
-		for _, candidate := range candidates {
-			if candidate.Headword == strings.ToLower(candidate.Headword) {
-				return candidate, true
-			}
-		}
-		return candidates[0], true
-	}
-
-	// ============ Step 3: Find words not found in main table ============
-	notFoundHeadwords := make([]string, 0)
-	for _, hw := range req.Words {
-		if _, found := selectWord(hw); !found {
-			notFoundHeadwords = append(notFoundHeadwords, hw)
-		}
-	}
-
-	// ============ Step 4: Query variants for not found words (fallback) ============
-	for _, hw := range notFoundHeadwords {
-		word, _, err := s.repo.GetWordByHeadword(hw, includeVariants, includePronunciations, includeSenses)
-		if err != nil {
-			if errors.Is(err, repository.ErrWordNotFound) {
-				continue
-			}
-			return nil, nil, err
-		}
-		addCandidate(word, hw)
-	}
-
-	// ============ Step 5: Build response in request order ============
-	responses := make([]model.WordResponse, 0, len(req.Words))
-	notFound := make([]string, 0)
-	for _, hw := range req.Words {
-		if word, ok := selectWord(hw); ok {
-			responses = append(responses, *s.convertToWordResponse(word, nil, nil, includeVariants, includePronunciations, includeSenses))
-		} else {
-			notFound = append(notFound, hw)
-		}
-	}
-
-	// ============ Step 6: Return results and metadata ============
+	responses, notFound := s.buildBatchResponses(req.Words, index, includeOptions)
 	requested := len(req.Words)
 	found := len(responses)
 
@@ -244,14 +163,171 @@ func (s *WordService) GetWordsBatch(req *model.BatchRequest) ([]model.WordRespon
 	return responses, meta, nil
 }
 
-// SearchWords performs fuzzy search
-func (s *WordService) SearchWords(keyword string, posCode *int, cefrLevel *int, oxfordLevel *int, cetLevel *int, maxFrequencyRank *int, minCollinsStars *int, limit, offset int) ([]model.SearchResultResponse, *model.MetaInfo, error) {
-	// Validate keyword length
-	keywordRunes := []rune(keyword)
-	if len(keywordRunes) < 2 {
-		return nil, nil, errors.New("keyword must be at least 2 characters")
+func (s *WordService) prepareBatchRequest(req *model.BatchRequest) (batchIncludeOptions, error) {
+	includeOptions := resolveBatchIncludeOptions(req)
+	if len(req.Words) == 0 {
+		return includeOptions, nil
 	}
-	if len(keywordRunes) > 100 {
+
+	cleanedWords := queryvalidation.NormalizeBatchWords(req.Words)
+	if len(cleanedWords) == 0 {
+		req.Words = cleanedWords
+		return includeOptions, nil
+	}
+	if len(cleanedWords) > s.config.APIBatchMaxSize {
+		return batchIncludeOptions{}, fmt.Errorf("%w: maximum %d words per request", ErrBatchLimitExceeded, s.config.APIBatchMaxSize)
+	}
+	req.Words = cleanedWords
+	return includeOptions, nil
+}
+
+func resolveBatchIncludeOptions(req *model.BatchRequest) batchIncludeOptions {
+	options := batchIncludeOptions{
+		variants:       true,
+		pronunciations: true,
+		senses:         true,
+	}
+	if req == nil {
+		return options
+	}
+	if req.IncludeVariants != nil {
+		options.variants = *req.IncludeVariants
+	}
+	if req.IncludePronunciations != nil {
+		options.pronunciations = *req.IncludePronunciations
+	}
+	if req.IncludeSenses != nil {
+		options.senses = *req.IncludeSenses
+	}
+	return options
+}
+
+func buildBatchCandidateIndex(words []repository.Word) batchCandidateIndex {
+	index := make(batchCandidateIndex, len(words))
+	for i := range words {
+		index.addCandidate(&words[i], nil, "")
+	}
+	return index
+}
+
+func (index batchCandidateIndex) addCandidate(word *model.Word, variant *model.WordVariant, alias string) {
+	if word == nil {
+		return
+	}
+	for _, key := range batchCandidateKeys(word, alias) {
+		if index.hasCandidate(key, word, variant) {
+			continue
+		}
+		index[key] = append(index[key], batchCandidate{word: word, variant: variant})
+	}
+}
+
+func batchCandidateKeys(word *model.Word, alias string) []string {
+	keys := []string{textutil.ToNormalized(word.Headword)}
+	if trimmed := strings.TrimSpace(alias); trimmed != "" {
+		aliasKey := textutil.ToNormalized(trimmed)
+		if aliasKey != "" && aliasKey != keys[0] {
+			keys = append(keys, aliasKey)
+		}
+	}
+	return keys
+}
+
+func (index batchCandidateIndex) hasCandidate(key string, word *model.Word, variant *model.WordVariant) bool {
+	for _, existing := range index[key] {
+		if sameBatchCandidate(existing, batchCandidate{word: word, variant: variant}) {
+			return true
+		}
+	}
+	return false
+}
+
+func sameBatchCandidate(left, right batchCandidate) bool {
+	if left.word == nil || right.word == nil || left.word.ID != right.word.ID {
+		return false
+	}
+	if left.variant == nil || right.variant == nil {
+		return left.variant == nil && right.variant == nil
+	}
+	return left.variant.VariantText == right.variant.VariantText
+}
+
+func (index batchCandidateIndex) selectCandidate(input string) (batchCandidate, bool) {
+	key := textutil.ToNormalized(input)
+	candidates := index[key]
+	if len(candidates) == 0 {
+		return batchCandidate{}, false
+	}
+	return preferredBatchCandidate(candidates, input), true
+}
+
+func preferredBatchCandidate(candidates []batchCandidate, input string) batchCandidate {
+	for _, candidate := range candidates {
+		if candidate.word.Headword == input {
+			return candidate
+		}
+	}
+	for _, candidate := range candidates {
+		if candidate.variant != nil && candidate.variant.VariantText == input {
+			return candidate
+		}
+	}
+	for _, candidate := range candidates {
+		if candidate.word.Headword == strings.ToLower(candidate.word.Headword) {
+			return candidate
+		}
+	}
+	return candidates[0]
+}
+
+func unresolvedBatchWords(words []string, index batchCandidateIndex) []string {
+	missing := make([]string, 0)
+	for _, word := range words {
+		if _, ok := index.selectCandidate(word); !ok {
+			missing = append(missing, word)
+		}
+	}
+	return missing
+}
+
+func (s *WordService) fillBatchVariantFallback(ctx context.Context, inputs []string, index batchCandidateIndex, options batchIncludeOptions) error {
+	missing := unresolvedBatchWords(inputs, index)
+	if len(missing) == 0 {
+		return nil
+	}
+
+	matches, err := s.repo.GetWordsByVariants(ctx, missing, options.variants, options.pronunciations, options.senses)
+	if err != nil {
+		return err
+	}
+	for i := range matches {
+		index.addCandidate(&matches[i].Word, &matches[i].Variant, matches[i].Variant.VariantText)
+	}
+	return nil
+}
+
+func (s *WordService) buildBatchResponses(inputs []string, index batchCandidateIndex, options batchIncludeOptions) ([]model.WordResponse, []string) {
+	responses := make([]model.WordResponse, 0, len(inputs))
+	notFound := make([]string, 0)
+	for _, input := range inputs {
+		candidate, ok := index.selectCandidate(input)
+		if !ok {
+			notFound = append(notFound, input)
+			continue
+		}
+		responses = append(responses, *s.convertToWordResponse(candidate.word, candidate.variant, nil, options.variants, options.pronunciations, options.senses))
+	}
+	return responses, notFound
+}
+
+// SearchWords performs fuzzy search
+func (s *WordService) SearchWords(ctx context.Context, keyword string, posCode *int, cefrLevel *int, oxfordLevel *int, cetLevel *int, maxFrequencyRank *int, minCollinsStars *int, limit, offset int) ([]model.SearchResultResponse, *model.MetaInfo, error) {
+	// Validate keyword length
+	keywordLength := queryvalidation.NormalizedRuneCount(keyword)
+	if keywordLength < queryvalidation.MinQueryLength {
+		return nil, nil, fmt.Errorf("keyword must be at least %d characters", queryvalidation.MinQueryLength)
+	}
+	if queryvalidation.TrimmedRuneCount(keyword) > 100 {
 		return nil, nil, errors.New("keyword must not exceed 100 characters")
 	}
 
@@ -266,7 +342,7 @@ func (s *WordService) SearchWords(keyword string, posCode *int, cefrLevel *int, 
 		offset = 0
 	}
 
-	words, total, err := s.repo.SearchWords(keyword, posCode, cefrLevel, oxfordLevel, cetLevel, maxFrequencyRank, minCollinsStars, limit, offset)
+	words, total, err := s.repo.SearchWords(ctx, keyword, posCode, cefrLevel, oxfordLevel, cetLevel, maxFrequencyRank, minCollinsStars, limit, offset)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -289,7 +365,8 @@ func (s *WordService) SearchWords(keyword string, posCode *int, cefrLevel *int, 
 			Headword: word.Headword,
 			POS:      posNames,
 			WordAnnotations: model.WordAnnotations{
-				CEFRLevel:      word.CEFRLevel,
+				CEFRLevel:      toAPICEFRLevel(word.CEFRLevel),
+				CEFRSource:     word.CEFRSource,
 				CETLevel:       toAPICETLevel(word.CETLevel),
 				OxfordLevel:    word.OxfordLevel,
 				SchoolLevel:    word.SchoolLevel,
@@ -311,13 +388,13 @@ func (s *WordService) SearchWords(keyword string, posCode *int, cefrLevel *int, 
 }
 
 // SuggestWords provides autocomplete suggestions
-func (s *WordService) SuggestWords(prefix string, cefrLevel *int, oxfordLevel *int, cetLevel *int, maxFrequencyRank *int, minCollinsStars *int, limit int) ([]model.SuggestResponse, error) {
+func (s *WordService) SuggestWords(ctx context.Context, prefix string, cefrLevel *int, oxfordLevel *int, cetLevel *int, maxFrequencyRank *int, minCollinsStars *int, limit int) ([]model.SuggestResponse, error) {
 	// Validate prefix length
-	prefixRunes := []rune(prefix)
-	if len(prefixRunes) < 1 {
-		return nil, errors.New("prefix must be at least 1 character")
+	prefixLength := queryvalidation.NormalizedRuneCount(prefix)
+	if prefixLength < queryvalidation.MinQueryLength {
+		return nil, fmt.Errorf("prefix must be at least %d characters", queryvalidation.MinQueryLength)
 	}
-	if len(prefixRunes) > 50 {
+	if queryvalidation.TrimmedRuneCount(prefix) > 50 {
 		return nil, errors.New("prefix must not exceed 50 characters")
 	}
 
@@ -328,7 +405,7 @@ func (s *WordService) SuggestWords(prefix string, cefrLevel *int, oxfordLevel *i
 		limit = s.config.APISuggestMaxLimit
 	}
 
-	words, err := s.repo.SuggestWords(prefix, cefrLevel, oxfordLevel, cetLevel, maxFrequencyRank, minCollinsStars, limit)
+	words, err := s.repo.SuggestWords(ctx, prefix, cefrLevel, oxfordLevel, cetLevel, maxFrequencyRank, minCollinsStars, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -338,7 +415,7 @@ func (s *WordService) SuggestWords(prefix string, cefrLevel *int, oxfordLevel *i
 		results = append(results, model.SuggestResponse{
 			Headword: word.Headword,
 			WordAnnotations: model.WordAnnotations{
-				CEFRLevel:      word.CEFRLevel,
+				CEFRLevel:      toAPICEFRLevel(word.CEFRLevel),
 				CEFRSource:     word.CEFRSource,
 				CETLevel:       toAPICETLevel(word.CETLevel),
 				OxfordLevel:    word.OxfordLevel,
@@ -355,7 +432,7 @@ func (s *WordService) SuggestWords(prefix string, cefrLevel *int, oxfordLevel *i
 }
 
 // SearchPhrases searches for phrases containing the keyword
-func (s *WordService) SearchPhrases(keyword string, limit int) ([]model.SuggestResponse, error) {
+func (s *WordService) SearchPhrases(ctx context.Context, keyword string, limit int) ([]model.SuggestResponse, error) {
 	// Validate keyword
 	keywordRunes := []rune(strings.TrimSpace(keyword))
 	if len(keywordRunes) < 1 {
@@ -372,7 +449,7 @@ func (s *WordService) SearchPhrases(keyword string, limit int) ([]model.SuggestR
 		limit = 50
 	}
 
-	words, err := s.repo.SearchPhrases(keyword, limit)
+	words, err := s.repo.SearchPhrases(ctx, keyword, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -382,7 +459,7 @@ func (s *WordService) SearchPhrases(keyword string, limit int) ([]model.SuggestR
 		results = append(results, model.SuggestResponse{
 			Headword: word.Headword,
 			WordAnnotations: model.WordAnnotations{
-				CEFRLevel:      word.CEFRLevel,
+				CEFRLevel:      toAPICEFRLevel(word.CEFRLevel),
 				CEFRSource:     word.CEFRSource,
 				CETLevel:       toAPICETLevel(word.CETLevel),
 				OxfordLevel:    word.OxfordLevel,
@@ -399,13 +476,13 @@ func (s *WordService) SearchPhrases(keyword string, limit int) ([]model.SuggestR
 }
 
 // GetPronunciations retrieves pronunciations for a word
-func (s *WordService) GetPronunciations(headword string, accentCode *int) ([]model.PronunciationResponse, error) {
-	word, _, err := s.repo.GetWordByHeadword(headword, false, false, false)
+func (s *WordService) GetPronunciations(ctx context.Context, headword string, accentCode *int) ([]model.PronunciationResponse, error) {
+	word, _, err := s.repo.GetWordByHeadword(ctx, headword, false, false, false)
 	if err != nil {
-		return nil, err
+		return nil, translateWordNotFound(err)
 	}
 
-	pronunciations, err := s.repo.GetPronunciationsByWordID(word.ID, accentCode)
+	pronunciations, err := s.repo.GetPronunciationsByWordID(ctx, word.ID, accentCode)
 	if err != nil {
 		return nil, err
 	}
@@ -414,13 +491,13 @@ func (s *WordService) GetPronunciations(headword string, accentCode *int) ([]mod
 }
 
 // GetSenses retrieves senses for a word
-func (s *WordService) GetSenses(headword string, posCode *int, lang string) ([]model.SenseResponse, error) {
-	word, _, err := s.repo.GetWordByHeadword(headword, false, false, false)
+func (s *WordService) GetSenses(ctx context.Context, headword string, posCode *int, lang string) ([]model.SenseResponse, error) {
+	word, _, err := s.repo.GetWordByHeadword(ctx, headword, false, false, false)
 	if err != nil {
-		return nil, err
+		return nil, translateWordNotFound(err)
 	}
 
-	senses, err := s.repo.GetSensesByWordID(word.ID, posCode)
+	senses, err := s.repo.GetSensesByWordID(ctx, word.ID, posCode)
 	if err != nil {
 		return nil, err
 	}
@@ -430,12 +507,12 @@ func (s *WordService) GetSenses(headword string, posCode *int, lang string) ([]m
 
 // Helper methods for conversion
 
-func (s *WordService) convertToWordResponse(word *repository.Word, variant *repository.WordVariant, accentCode *int, includeVariants, includePronunciations, includeSenses bool) *model.WordResponse {
+func (s *WordService) convertToWordResponse(word *model.Word, variant *model.WordVariant, accentCode *int, includeVariants, includePronunciations, includeSenses bool) *model.WordResponse {
 	resp := &model.WordResponse{
 		ID:       word.ID,
 		Headword: word.Headword,
 		WordAnnotations: model.WordAnnotations{
-			CEFRLevel:      word.CEFRLevel,
+			CEFRLevel:      toAPICEFRLevel(word.CEFRLevel),
 			CEFRSource:     word.CEFRSource,
 			CETLevel:       toAPICETLevel(word.CETLevel),
 			OxfordLevel:    word.OxfordLevel,
@@ -448,7 +525,7 @@ func (s *WordService) convertToWordResponse(word *repository.Word, variant *repo
 	}
 
 	// If word was found via variant, add queried variant info
-	if variant != nil && variant.FrequencyRank > 0 {
+	if variant != nil {
 		usageRatio := 0.0
 		if word.FrequencyCount > 0 {
 			usageRatio = float64(variant.FrequencyCount) / float64(word.FrequencyCount) * 100
@@ -476,7 +553,7 @@ func (s *WordService) convertToWordResponse(word *repository.Word, variant *repo
 	return resp
 }
 
-func (s *WordService) convertPronunciations(pronunciations []repository.Pronunciation, accentCode *int) []model.PronunciationResponse {
+func (s *WordService) convertPronunciations(pronunciations []model.Pronunciation, accentCode *int) []model.PronunciationResponse {
 	results := make([]model.PronunciationResponse, 0, len(pronunciations))
 	for _, p := range pronunciations {
 		if accentCode != nil && p.Accent != *accentCode {
@@ -492,13 +569,13 @@ func (s *WordService) convertPronunciations(pronunciations []repository.Pronunci
 	return results
 }
 
-func (s *WordService) convertSenses(senses []repository.Sense, lang string) []model.SenseResponse {
+func (s *WordService) convertSenses(senses []model.Sense, lang string) []model.SenseResponse {
 	results := make([]model.SenseResponse, 0, len(senses))
 	for _, sense := range senses {
 		senseResp := model.SenseResponse{
 			SenseID:      sense.ID,
 			POS:          model.GetPOSName(sense.POS),
-			CEFRLevel:    sense.CEFRLevel,
+			CEFRLevel:    toAPICEFRLevel(sense.CEFRLevel),
 			CEFRSource:   sense.CEFRSource,
 			OxfordLevel:  sense.OxfordLevel,
 			DefinitionEN: sense.DefinitionEN,
@@ -513,7 +590,7 @@ func (s *WordService) convertSenses(senses []repository.Sense, lang string) []mo
 	return results
 }
 
-func (s *WordService) convertExamples(examples []repository.Example, lang string) []model.ExampleResponse {
+func (s *WordService) convertExamples(examples []model.Example, lang string) []model.ExampleResponse {
 	results := make([]model.ExampleResponse, 0, len(examples))
 	for _, ex := range examples {
 		exampleResp := model.ExampleResponse{
@@ -549,7 +626,7 @@ func applyExampleLangFilter(exampleResp *model.ExampleResponse, lang string) {
 	}
 }
 
-func (s *WordService) convertVariants(variants []repository.WordVariant) []model.VariantResponse {
+func (s *WordService) convertVariants(variants []model.WordVariant) []model.VariantResponse {
 	results := make([]model.VariantResponse, 0, len(variants))
 	for _, v := range variants {
 		results = append(results, *s.convertVariant(v))
@@ -557,7 +634,7 @@ func (s *WordService) convertVariants(variants []repository.WordVariant) []model
 	return results
 }
 
-func (s *WordService) convertVariant(v repository.WordVariant) *model.VariantResponse {
+func (s *WordService) convertVariant(v model.WordVariant) *model.VariantResponse {
 	resp := &model.VariantResponse{
 		VariantText:    v.VariantText,
 		Kind:           model.GetVariantKindName(int(v.Kind)),
@@ -569,6 +646,26 @@ func (s *WordService) convertVariant(v repository.WordVariant) *model.VariantRes
 		resp.FormType = model.GetFormTypeName(*v.FormType)
 	}
 	return resp
+}
+
+func toAPICEFRLevel(dbLevel int) string {
+	return model.GetCEFRLevelName(dbLevel)
+}
+
+func translateWordNotFound(err error) error {
+	if errors.Is(err, repository.ErrWordNotFound) {
+		return contracts.ErrWordNotFound
+	}
+
+	return err
+}
+
+func translateVariantNotFound(err error) error {
+	if errors.Is(err, repository.ErrVariantNotFound) {
+		return contracts.ErrVariantNotFound
+	}
+
+	return err
 }
 
 // toAPICETLevel converts the database CET level encoding (0,1,2) to the

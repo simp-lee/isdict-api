@@ -7,20 +7,20 @@
 --   → isdict-commons/migration/migration.go (CreateIndexes method)
 --
 -- For production deployment, use the Go migration tool (recommended):
---   go run cmd/migrate-db/main.go --drop
+--   go run cmd/migrate-db/main.go --drop --force --confirm-drop postgres@db.example.com:5432/isdict
 --
 -- This SQL file may become outdated. Always verify against the Go code.
--- Last synchronized: 2025-11-04
+-- Last synchronized: 2026-03-08
 -- ==============================================================================
 --
 -- Performance indexes for fast query execution
 --
 -- Prerequisites:
 -- 1. Database schema created (run schema.sql first or use Go migration)
--- 2. pg_trgm extension enabled (for fuzzy search)
+-- 2. pg_trgm extension enabled before creating trigram indexes
 --
 -- Legacy Usage (for backward compatibility):
--- psql -d isdict -f db/indexes.sql
+-- psql --host "$PGHOST" --port "$PGPORT" --username "$PGUSER" --dbname "$PGDATABASE" -f db/indexes.sql
 -- ==============================================================================
 
 -- ==============================================================================
@@ -54,14 +54,10 @@ CREATE INDEX IF NOT EXISTS idx_words_school_level ON words(school_level);
 CREATE INDEX IF NOT EXISTS idx_words_frequency_rank ON words(frequency_rank);
 CREATE INDEX IF NOT EXISTS idx_words_collins_stars ON words(collins_stars);
 
--- Trigram index for fuzzy search (requires pg_trgm extension)
-CREATE INDEX IF NOT EXISTS idx_words_headword_trgm ON words USING gin(headword_normalized gin_trgm_ops);
-
--- Trigram index for phrase search (case-insensitive, space-preserving)
--- Optimizes queries like: LOWER(headword) LIKE '% keyword %'
-CREATE INDEX IF NOT EXISTS idx_words_phrase_lower_trgm 
-ON words USING gin((lower(headword)) gin_trgm_ops) 
-WHERE headword LIKE '% %';
+-- Foreign key indexes for repository lookups and cascade maintenance
+CREATE INDEX IF NOT EXISTS idx_pronunciations_word_id ON pronunciations(word_id);
+CREATE INDEX IF NOT EXISTS idx_senses_word_id ON senses(word_id);
+CREATE INDEX IF NOT EXISTS idx_examples_sense_id ON examples(sense_id);
 
 -- ==============================================================================
 -- Word variants table indexes
@@ -79,53 +75,24 @@ CREATE INDEX IF NOT EXISTS idx_word_variants_word_id ON word_variants(word_id);
 -- Frequency ranking for variants
 CREATE INDEX IF NOT EXISTS idx_word_variants_frequency_rank ON word_variants(frequency_rank);
 
--- Trigram index for fuzzy search on variants
+CREATE INDEX IF NOT EXISTS idx_words_headword_trgm ON words USING gin(headword_normalized gin_trgm_ops);
+CREATE INDEX IF NOT EXISTS idx_words_phrase_lower_trgm ON words USING gin((lower(headword)) gin_trgm_ops) WHERE headword LIKE '% %';
 CREATE INDEX IF NOT EXISTS idx_word_variants_headword_trgm ON word_variants USING gin(headword_normalized gin_trgm_ops);
+CREATE INDEX IF NOT EXISTS idx_word_variants_phrase_lower_trgm ON word_variants USING gin((lower(variant_text)) gin_trgm_ops) WHERE variant_text LIKE '% %';
 
--- Trigram index for phrase search on variants (case-insensitive, space-preserving)
--- Optimizes queries like: LOWER(variant_text) LIKE '% keyword %'
-CREATE INDEX IF NOT EXISTS idx_word_variants_phrase_lower_trgm 
-ON word_variants USING gin((lower(variant_text)) gin_trgm_ops) 
-WHERE variant_text LIKE '% %';
-
--- ==============================================================================
--- Pronunciations table indexes
--- ==============================================================================
-
--- Foreign key index for joins
-CREATE INDEX IF NOT EXISTS idx_pronunciations_word_id ON pronunciations(word_id);
-
--- ==============================================================================
--- Senses table indexes
--- ==============================================================================
-
--- Foreign key index for joins
-CREATE INDEX IF NOT EXISTS idx_senses_word_id ON senses(word_id);
-
--- ==============================================================================
--- Examples table indexes
--- ==============================================================================
-
--- Foreign key index for joins
-CREATE INDEX IF NOT EXISTS idx_examples_sense_id ON examples(sense_id);
-
--- ==============================================================================
--- Index creation complete
--- ==============================================================================
 -- 
 -- Index Summary:
---   • Unique constraints: 2 (data integrity)
---   • B-tree indexes: 12 (exact/prefix/range/filter queries)
+--   • Unique indexes: 2 (data integrity)
+--   • Non-unique B-tree indexes: 14 (exact/prefix/range/filter/join queries)
 --   • GIN trigram indexes: 4 (fuzzy search optimization)
---   • Foreign key indexes: 4 (JOIN optimization)
---   • Total: 22 indexes
+--   • Total: 20 indexes when pg_trgm is enabled
 --
 -- Verify indexes:
 --   \di+ in psql to list all indexes with sizes
 --   SELECT * FROM pg_indexes WHERE schemaname = 'public';
 --
 -- Performance tips:
---   • Trigram indexes require pg_trgm extension
+--   • Trigram indexes require the pg_trgm extension
 --   • Run ANALYZE after bulk data import
 --   • Monitor index usage: SELECT * FROM pg_stat_user_indexes;
 -- ==============================================================================

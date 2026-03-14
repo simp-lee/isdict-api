@@ -2,12 +2,14 @@
 
 English | [中文](README.zh-CN.md)
 
-[![Go Version](https://img.shields.io/badge/go-1.24-blue.svg)](https://golang.org)
+[![Go Version](https://img.shields.io/badge/go-1.25-blue.svg)](https://golang.org)
 [![Go Report Card](https://goreportcard.com/badge/github.com/simp-lee/isdict-api)](https://goreportcard.com/report/github.com/simp-lee/isdict-api)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 [![Test](https://github.com/simp-lee/isdict-api/workflows/Test/badge.svg)](https://github.com/simp-lee/isdict-api/actions)
 
-English-Chinese dictionary API backed by PostgreSQL and the shared [isdict-commons](https://github.com/simp-lee/isdict-commons) models.
+isdict-api is a Gin-based English-Chinese dictionary service backed by PostgreSQL. It serves a REST API under `/api/v1`, exposes liveness and readiness probes, and includes a built-in web UI for local lookup.
+
+Detailed API fields and examples live in [api.md](api.md).
 
 ## Key Features
 
@@ -18,176 +20,171 @@ IsDict integrates six authoritative dictionary data sources (Wiktionary, Oxford,
 - **Bilingual Support**: 976,000 English senses + 260,000 Chinese translations, 584,000 authentic bilingual example sentences
 - **Powerful Search & Query**: Prefix autocomplete, intelligent phrase matching, 888,000 word form variants lookup
 - **Multi-Dimensional Level Tags**: CEFR A1-C2, CET-4/6, Oxford 3000/5000, Collins stars, word frequency TOP 50K
-- **Production-Ready Middleware**: Rate limiting, CORS, caching, request ID tracking, and timeouts—see [Middleware Features](#middleware-features) for details
+- **Production-Ready Middleware**: Rate limiting, CORS, caching, request ID tracking, and timeouts; see [Middleware Notes](#middleware-notes)
 - **Out-of-the-Box**: Health checks, graceful shutdown, connection pooling, and request limits
 - **Built-in Web Console**: Lightweight Alpine.js/Tailwind single-page app for quick lookups
 
-See [api.md](api.md) for the full API surface.
+## What It Includes
 
-## Getting Started
+- Dictionary endpoints for words, variants, pronunciations, senses, search, suggest, and phrase lookup
+- PostgreSQL-backed storage with required extension checks for `pg_trgm`
+- Middleware for rate limiting, CORS, request timeout, request ID, caching, recovery, and logging
+- Local static UI served at `/` and bundled JavaScript at `/static/js`
+- Migration CLI in `cmd/migrate-db`
 
-### Prerequisites
+## Requirements
 
-- Go 1.24+
+- Go 1.25+
 - PostgreSQL 14+
-- Dictionary data (sample SQL or full dump)
+- Node.js 22+ only if you run the web regression test or `make test`
 
-### Run Locally
+## Quick Start
 
 ```bash
 git clone https://github.com/simp-lee/isdict-api.git
 cd isdict-api
 go mod download
 cp configs/api.example.env configs/api.env
-# Edit configs/api.env with your database credentials
-go run cmd/api/main.go
+# Edit configs/api.env
+make db-setup
+make run
 ```
 
-- REST API: http://localhost:8080/api/v1
-- Web UI: http://localhost:8080
-- Health check: http://localhost:8080/health
+By default, `make run` and `make db-setup` load `configs/api.env` through `ISDICT_API_ENV_FILE`.
 
-### Docker
+Default local URLs:
 
-```bash
-docker build -t isdict-api .
-docker run -d -p 8080:8080 --name isdict-api \
-  -e DB_HOST=your-db-host \
-  -e DB_USER=your-user \
-  -e DB_PASSWORD=your-password \
-  isdict-api
-```
-
-Or use Docker Compose for a complete local environment with PostgreSQL:
-
-```bash
-docker-compose up -d
-```
+- API base: http://localhost:8080/api/v1
+- Web UI: http://localhost:8080/
+- Liveness: http://localhost:8080/health
+- Readiness: http://localhost:8080/api/v1/health
 
 ## Configuration
 
-Runtime settings are loaded from environment variables and a `.env` file (if present). The loader checks, in order: environment variables → `configs/api.env` → `.env` → `api/.env` → `../.env`, stopping at the first file it finds.
+The application reads process environment first.
 
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `DB_HOST` | localhost | PostgreSQL host |
-| `DB_PORT` | 5432 | PostgreSQL port |
-| `DB_USER` | postgres | Database user |
-| `DB_PASSWORD` | postgres | Database password |
-| `DB_NAME` | isdict | Database name |
-| `DB_SSLMODE` | prefer | PostgreSQL SSL mode |
-| `PORT` | 8080 | HTTP listen port |
-| `GIN_MODE` | debug | `debug`, `release`, or `test` |
-| `DB_MAX_IDLE_CONNS` | 10 | Connection pool idle cap |
-| `DB_MAX_OPEN_CONNS` | 100 | Connection pool max open |
-| `API_BATCH_MAX_SIZE` | 100 | Max words per batch request |
-| `API_SEARCH_MAX_LIMIT` | 100 | Max search results |
-| `API_SUGGEST_MAX_LIMIT` | 50 | Max suggestions |
+- If `ISDICT_API_ENV_FILE` is set, only that file is loaded.
+- Otherwise it tries `.env`, `api/.env`, then `../.env`.
+- `DB_*` values also accept `PG*` aliases such as `PGHOST`, `PGPORT`, `PGUSER`, `PGPASSWORD`, `PGDATABASE`, and `PGSSLMODE`.
 
-### Middleware Configuration
+Common settings:
 
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `ENABLE_RATE_LIMIT` | true | Enable rate limiting |
-| `RATE_LIMIT_RPS` | 100 | Requests per second limit |
-| `RATE_LIMIT_BURST` | 200 | Burst capacity for token bucket |
-| `RATE_LIMIT_PER_HOUR` | 10000 | Requests per hour limit |
-| `RATE_LIMIT_PER_DAY` | 0 | Requests per day limit (0=disabled) |
-| `ENABLE_CORS` | true | Enable CORS headers |
-| `CORS_ALLOW_ORIGINS` | * | Allowed origins (comma-separated) |
-| `ENABLE_TIMEOUT` | true | Enable request timeout |
-| `TIMEOUT_SECONDS` | 30 | Request timeout duration |
-| `ENABLE_REQUEST_ID` | true | Enable request ID generation |
-| `ENABLE_CACHE` | true | Enable response caching |
-| `CACHE_MAX_SIZE` | 1000 | Maximum cache entries |
-| `CACHE_EXPIRATION_MINS` | 5 | Cache entry expiration time |
+| Variable | Default | Notes |
+|----------|---------|-------|
+| `DB_HOST` | `localhost` | PostgreSQL host |
+| `DB_PORT` | `5432` | PostgreSQL port |
+| `DB_USER` | `postgres` | PostgreSQL user |
+| `DB_PASSWORD` | `postgres` | PostgreSQL password |
+| `DB_NAME` | `isdict` | Database name |
+| `DB_SSLMODE` | `prefer` | Use `require` or stricter for managed PostgreSQL |
+| `PORT` | `8080` | HTTP listen port |
+| `GIN_MODE` | `debug` | `debug`, `release`, `test` |
+| `DB_MAX_IDLE_CONNS` | `10` | Connection pool idle cap |
+| `DB_MAX_OPEN_CONNS` | `100` | Connection pool max open |
+| `API_BATCH_MAX_SIZE` | `100` | Max words in `POST /api/v1/words/batch` |
+| `API_SEARCH_MAX_LIMIT` | `100` | Max `limit` for `/search` |
+| `API_SUGGEST_MAX_LIMIT` | `50` | Max `limit` for `/suggest` |
+| `ENABLE_RATE_LIMIT` | `true` | Rate limiting middleware |
+| `ENABLE_CORS` | `true` | CORS middleware |
+| `ENABLE_TIMEOUT` | `true` | Timeout middleware |
+| `TIMEOUT_SECONDS` | `30` | Request timeout |
+| `ENABLE_REQUEST_ID` | `true` | Adds `X-Request-Id` |
+| `ENABLE_CACHE` | `true` | GET cache for `/api/*` |
+| `ISDICT_API_ENV_FILE` | empty | Explicit env file path |
 
-**Notes:**
-- Rate limiting is bypassed for `/health` and static files
-- Response caching applies only to GET requests on `/api/*` paths
-- Request IDs are included in all responses via `X-Request-Id` header
-- Rate limit headers: `X-Ratelimit-Limit`, `X-Ratelimit-Limit-Hour`, `X-Ratelimit-Remaining`
+Readiness checks both database connectivity and required PostgreSQL extension availability. In practice, `/api/v1/health` returns `200` only when the database is reachable and `pg_trgm` is present.
 
-## Database
+## Database Workflow
 
-The schema and indexes are managed via database migrations in `isdict-commons/migration`. Use the `cmd/migrate-db` tool for all database operations.
-
-### Production Workflow
+The primary database workflow is the migration CLI in `cmd/migrate-db`.
 
 ```bash
-# Fresh migration (drop and recreate all tables)
-go run cmd/migrate-db/main.go --drop
+# Apply migrations
+ISDICT_API_ENV_FILE=configs/api.env go run ./cmd/migrate-db
 
-# Incremental migration (create missing tables/indexes)
-go run cmd/migrate-db/main.go
+# Verify migration-managed objects
+ISDICT_API_ENV_FILE=configs/api.env go run ./cmd/migrate-db --verify
 
-# Verify migration status
-go run cmd/migrate-db/main.go --verify
+# Drop and recreate tables, guarded by explicit confirmation
+ISDICT_API_ENV_FILE=configs/api.env \
+go run ./cmd/migrate-db --drop --force --confirm-drop postgres@db.example.com:5432/isdict
 ```
 
-### Quick Test with Sample Data
+Helper targets:
 
-For quick local testing, you can use the SQL helpers in the `db/` directory:
+- `make db-setup`: run the migration CLI
+- `make db-verify`: verify migration-managed objects through the migration CLI
+- `make db-reset`: guarded reset flow; requires `CONFIRM_DROP` to exactly match the target database
+- `make db-fixtures`: load `db/sample_data.sql` into an empty migrated database only; requires `CONFIRM_FIXTURES`
+- `make db-sql-setup`: apply reference SQL from `db/` for testing or fixture work; `pg_trgm` must already be available
+
+All four database helper targets resolve connection settings in the same order: exported `DB_*`, then exported `PG*`, then the file pointed to by `ISDICT_API_ENV_FILE` (default `configs/api.env` in the Makefile).
+
+## HTTP Surface
+
+| Method | Path | Purpose |
+|--------|------|---------|
+| `GET` | `/health` | Liveness probe |
+| `GET` | `/api/v1/health` | Readiness probe |
+| `GET` | `/api/v1/words/:headword` | Full word entry |
+| `GET` | `/api/v1/words/:headword/pronunciations` | Pronunciations only |
+| `GET` | `/api/v1/words/:headword/senses` | Senses only |
+| `GET` | `/api/v1/words/by-variant/:variant` | Reverse lookup by variant |
+| `POST` | `/api/v1/words/batch` | Batch lookup |
+| `GET` | `/api/v1/search` | Search with filters |
+| `GET` | `/api/v1/suggest` | Autocomplete |
+| `GET` | `/api/v1/phrases` | Phrase lookup |
+
+Current request rules worth knowing:
+
+- `cefr_level` accepts only `A1`, `A2`, `B1`, `B2`, `C1`, `C2`
+- `/search` requires `q`; default `limit` is `20`
+- `/suggest` requires `prefix`; default `limit` is `10`
+- `/phrases` requires `q`; max `limit` is `50`
+- `/health` and `/api/v1/health` return plain JSON, not the standard response envelope
+
+## Middleware Notes
+
+- `/health` and `/api/v1/health` bypass rate limiting and response caching
+- Timeout middleware applies to normal API routes; readiness uses its own database ping timeout
+- The built-in UI is served locally by the API process at `/`, with bundled JavaScript exposed at `/static/js`
+
+## Tests
 
 ```bash
-createdb isdict
-psql -d isdict -f db/schema.sql
-psql -d isdict -f db/indexes.sql
-psql -d isdict -f db/sample_data.sql
+# Full default test flow
+make test
+
+# Go tests only
+go test -v -race ./...
+
+# Web regression test only
+node --test web/dictionary_app.test.mjs
+
+# Middleware package tests
+go test ./internal/api/middleware -count=1
+
+# Middleware probe clients
+go run ./tests/middleware/basic
+go run ./tests/middleware/verify
+go run ./tests/middleware/stress
 ```
 
-**Note:** The SQL files in `db/` are for reference and testing only. They may lag behind the authoritative migrations in `isdict-commons/migration`.
+The middleware probe clients assume `http://localhost:8080` unless you override them with environment variables.
 
-## Middleware Features
-
-The API includes production-ready middleware powered by [ginx](https://github.com/simp-lee/ginx):
-
-- **Rate Limiting**: Token bucket algorithm with configurable RPS, burst, and hourly/daily limits
-- **CORS**: Cross-origin resource sharing with configurable origins and methods
-- **Response Caching**: Automatic GET request caching with configurable size and TTL
-- **Request ID**: Unique request tracking for debugging and logging
-- **Timeout Protection**: Configurable request timeout to prevent resource exhaustion
-- **Panic Recovery**: Automatic recovery from panics with structured error responses
-- **Structured Logging**: Request/response logging with timing and status codes
-
-Run verification tests:
-```bash
-# Start the API server first
-go run cmd/api/main.go
-
-# In another terminal, run middleware tests
-go run tests/middleware/verify/main.go
-
-# Or run stress tests
-go run tests/middleware/stress/main.go
-```
-
-## Web Console
-
-- Single-page app served from `web/index.html`
-- Instant suggestions with CEFR/Oxford/CET badges and frequency ranks
-- Variants, bilingual definitions, pronunciations, and tagged examples in dedicated tabs
-- Works out of the box at `http://localhost:8080`
-- Configure `apiBaseURL` in `index.html` if pointing to a remote API endpoint
+PostgreSQL integration tests are guarded for disposable local or socket-based instances by default. To intentionally run them against a disposable non-local PostgreSQL instance, set `ISDICT_ALLOW_NONLOCAL_TEST_POSTGRES=true` alongside `TEST_POSTGRES_DSN` and, for migration tests that create databases or roles, `TEST_POSTGRES_ADMIN_DSN`.
 
 ## Project Layout
 
-```
-cmd/
-  api/          # API entrypoint
-  migrate-db/   # Database migration tool
-configs/        # Environment templates
-db/             # SQL references (schema, indexes, sample data)
-internal/       # Handlers, services, repositories, configuration
-  api/          # API layer (handler, service, repository, middleware)
-  config/       # Configuration loader
-tests/          # Test suites
-  middleware/   # Middleware tests (basic, verify, stress)
-web/            # Static web console (Alpine.js + Tailwind)
+```text
+cmd/            application entrypoints
+configs/        environment templates
+db/             reference SQL and sample data
+internal/       handlers, services, repositories, middleware, config
+tests/          middleware probe programs and tests
+web/            built-in static UI
 ```
 
 ## License
 
-MIT License. See `LICENSE` for details.
-
-Built for English learners and educators.
+MIT. See [LICENSE](LICENSE).

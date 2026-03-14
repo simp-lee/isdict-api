@@ -133,7 +133,7 @@
                                         <p class="mt-1 text-xs text-slate-500" x-show="item.translation_zh" x-text="formatTranslation(item.translation_zh)"></p>
                                     </div>
                                     <div class="flex flex-col items-end gap-1 text-xs text-slate-500">
-                                        <span x-show="item.cefr_level > 0" :class="getCEFRBadgeClass(item.cefr_level)" class="rounded-full px-2 py-0.5 font-medium" x-text="getCEFRLevelText(item.cefr_level)"></span>
+                                        <span x-show="hasCEFRLevel(item.cefr_level)" :class="getCEFRBadgeClass(item.cefr_level)" class="rounded-full px-2 py-0.5 font-medium" x-text="getCEFRLevelText(item.cefr_level)"></span>
                                         <span x-show="item.frequency_rank > 0 && item.frequency_rank <= 5000" class="rounded-full bg-slate-100 px-2 py-0.5">TOP<span x-text="item.frequency_rank"></span></span>
                                     </div>
                                 </div>
@@ -207,7 +207,7 @@
                                             <p class="mt-1 text-xs text-slate-500" x-show="item.translation_zh" x-text="formatTranslation(item.translation_zh)"></p>
                                         </div>
                                         <div class="flex flex-col items-end gap-1 text-xs text-slate-500">
-                                            <span x-show="item.cefr_level > 0" :class="getCEFRBadgeClass(item.cefr_level)" class="rounded-full px-2 py-0.5 font-medium" x-text="getCEFRLevelText(item.cefr_level)"></span>
+                                            <span x-show="hasCEFRLevel(item.cefr_level)" :class="getCEFRBadgeClass(item.cefr_level)" class="rounded-full px-2 py-0.5 font-medium" x-text="getCEFRLevelText(item.cefr_level)"></span>
                                             <span x-show="item.frequency_rank > 0 && item.frequency_rank <= 5000" class="rounded-full bg-slate-100 px-2 py-0.5">TOP<span x-text="item.frequency_rank"></span></span>
                                         </div>
                                     </div>
@@ -303,7 +303,7 @@
                         </div>
                         <div class="flex-1">
                             <h3 class="text-lg font-semibold text-slate-900">开放 API 接口</h3>
-                            <p class="mt-2 text-sm leading-relaxed text-slate-600">提供完整 RESTful API（9个端点），支持单词、批量、短语、搜索、补全等查询，可轻松集成至各类应用。</p>
+                            <p class="mt-2 text-sm leading-relaxed text-slate-600">提供完整 RESTful API（<span x-text="apiBusinessEndpointCount"></span>个业务端点 + <span x-text="apiHealthEndpointCount"></span>个健康检查端点），支持单词、批量、短语、搜索、补全等查询，可轻松集成至各类应用。</p>
                         </div>
                     </div>
                 </article>
@@ -347,7 +347,7 @@
                 <svg class="h-12 w-12 text-rose-300" viewBox="0 0 24 24" fill="none" stroke="currentColor">
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
                 </svg>
-                <h3 class="mt-3 text-lg font-semibold">未找到单词</h3>
+                <h3 class="mt-3 text-lg font-semibold" x-text="getErrorTitle()"></h3>
                 <p class="mt-2 text-sm text-rose-500" x-text="error"></p>
                 <div x-show="searchResults.length" class="mt-6 w-full">
                     <p class="text-sm text-rose-500/80">也许你想找:</p>
@@ -387,7 +387,7 @@
                         </div>
                     </div>
                     <div class="flex flex-wrap gap-2 md:justify-end">
-                        <span x-show="currentWord?.cefr_level > 0" :class="getCEFRBadgeClass(currentWord?.cefr_level)" class="level-badge bg-white border border-slate-200 text-slate-700" x-text="getCEFRLevelText(currentWord?.cefr_level)"></span>
+                        <span x-show="hasCEFRLevel(currentWord?.cefr_level)" :class="getCEFRBadgeClass(currentWord?.cefr_level)" class="level-badge bg-white border border-slate-200 text-slate-700" x-text="getCEFRLevelText(currentWord?.cefr_level)"></span>
                         <span x-show="currentWord?.cet_level > 0" class="level-badge bg-white border border-slate-200 text-slate-700" x-text="getCETLevelText(currentWord?.cet_level)"></span>
                         <span x-show="currentWord?.oxford_level > 0" class="level-badge bg-white border border-yellow-200 text-yellow-700" x-text="getOxfordLevelText(currentWord?.oxford_level)"></span>
                         <span x-show="currentWord?.frequency_rank > 0 && currentWord?.frequency_rank <= 10000" class="level-badge bg-white border border-slate-200 text-slate-600 font-mono">TOP<span x-text="currentWord?.frequency_rank"></span></span>
@@ -427,6 +427,28 @@
                 </div>
             </section>
 
+            <section x-show="variantCandidates.length > 1" class="space-y-3">
+                <div class="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
+                    <h3 class="text-sm font-semibold tracking-wide text-slate-700">变体候选</h3>
+                    <p class="text-xs text-slate-500">该变体命中了多个词条，当前先展示一个候选，你可以切换到其他结果。</p>
+                </div>
+                <div class="flex flex-wrap gap-2">
+                    <template x-for="(candidate, index) in variantCandidates" :key="`${candidate.headword}-${index}`">
+                        <button
+                            type="button"
+                            @click="selectVariantCandidate(candidate)"
+                            class="rounded-lg border px-3 py-2 text-left text-sm transition"
+                            :class="isCurrentVariantCandidate(candidate)
+                                ? 'border-red-200 bg-rose-50 text-red-700'
+                                : 'border-slate-200 bg-slate-50 text-slate-700 hover:border-rose-200 hover:bg-rose-50'"
+                        >
+                            <div class="font-medium" x-text="candidate.headword"></div>
+                            <div class="mt-1 text-xs text-slate-500" x-show="candidate.translation_zh" x-text="formatTranslation(candidate.translation_zh)"></div>
+                        </button>
+                    </template>
+                </div>
+            </section>
+
             <section x-show="getAliasVariants().length > 0" class="space-y-3">
                 <h3 class="text-sm font-semibold tracking-wide text-slate-700">拼写变体</h3>
                 <div class="flex flex-wrap gap-2">
@@ -457,8 +479,8 @@
                                                     <p x-show="sense.definition_en" class="text-[15px] leading-relaxed text-slate-800" x-text="sense.definition_en"></p>
                                                     <p x-show="sense.definition_zh" class="text-[14px] text-slate-500" x-text="sense.definition_zh"></p>
                                                 </div>
-                                                <div class="flex flex-wrap items-center gap-2" x-show="sense.cefr_level > 0 || sense.oxford_level > 0">
-                                                    <span x-show="sense.cefr_level > 0" :class="getCEFRBadgeClass(sense.cefr_level)" class="rounded bg-white px-1.5 py-0.5 text-[10px] font-semibold" x-text="getCEFRLevelText(sense.cefr_level)"></span>
+                                                <div class="flex flex-wrap items-center gap-2" x-show="hasCEFRLevel(sense.cefr_level) || sense.oxford_level > 0">
+                                                    <span x-show="hasCEFRLevel(sense.cefr_level)" :class="getCEFRBadgeClass(sense.cefr_level)" class="rounded bg-white px-1.5 py-0.5 text-[10px] font-semibold" x-text="getCEFRLevelText(sense.cefr_level)"></span>
                                                     <span x-show="sense.oxford_level > 0" class="rounded bg-yellow-100 px-1.5 py-0.5 text-[10px] font-semibold text-yellow-700" x-text="getOxfordLevelText(sense.oxford_level)"></span>
                                                 </div>
                                                 <div x-show="sense.examples && sense.examples.length" class="space-y-2">
@@ -565,7 +587,7 @@
                     <div class="flex-1 space-y-2">
                         <h5 class="text-sm font-semibold text-slate-900">许可证说明</h5>
                         <div class="space-y-1.5 text-xs leading-relaxed text-slate-600">
-                            <p><strong class="text-slate-700">项目代码：</strong>采用 MIT 开源协议，可自由使用、修改和分发。访问 <a href="https://github.com/simp-lee/isdict-api" target="_blank" class="text-blue-600 hover:underline">GitHub 仓库</a> 获取源码。</p>
+                            <p><strong class="text-slate-700">项目代码：</strong>采用 MIT 开源协议，可自由使用、修改和分发。访问 <a href="https://github.com/simp-lee/isdict-api" target="_blank" rel="noopener noreferrer" class="text-blue-600 hover:underline">GitHub 仓库</a> 获取源码。</p>
                             <p><strong class="text-slate-700">数据使用：</strong>核心数据源自 Wiktionary、FrequencyWords (CC BY-SA 4.0)；ECDICT (MIT)；CEFR-J (A1-B2 免费商业使用 + C1-C2 CC BY-SA 4.0)；Oxford (教育研究使用)。</p>
                             <p><strong class="text-slate-700">API 服务：</strong>本站提供查询 API 服务不构成数据再分发，符合所有数据源使用条款，可合法商业化。</p>
                         </div>
@@ -578,7 +600,7 @@
         <section x-show="!hasSearched" x-transition class="rounded-3xl border border-slate-200 bg-gradient-to-br from-white to-slate-50 px-4 sm:px-6 md:px-8 py-8 sm:py-10 shadow-sm">
             <div class="text-center space-y-3 mb-8">
                 <p class="text-xs font-semibold tracking-[0.4em] text-red-500">开发者接入</p>
-                <h3 class="text-xl font-semibold text-slate-900">RESTful API · 9个端点 · 开箱即用</h3>
+                <h3 class="text-xl font-semibold text-slate-900">RESTful API · <span x-text="apiBusinessEndpointCount"></span>个业务端点 + <span x-text="apiHealthEndpointCount"></span>个健康检查端点 · 开箱即用</h3>
                 <p class="text-sm text-slate-500">提供完整的词典查询 API，支持单词查询、批量查询、短语查询、搜索补全等功能</p>
             </div>
 
@@ -676,7 +698,7 @@
                                 </div>
                             </div>
                             <div class="flex gap-2">
-                                <a href="/api/v1/words/example" target="_blank" class="flex-1 inline-flex items-center justify-center gap-2 rounded-lg bg-blue-500 px-4 py-2 text-sm font-medium text-white transition hover:bg-blue-600">
+                                <a href="/api/v1/words/example" target="_blank" rel="noopener noreferrer" class="flex-1 inline-flex items-center justify-center gap-2 rounded-lg bg-blue-500 px-4 py-2 text-sm font-medium text-white transition hover:bg-blue-600">
                                     <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"></path>
                                     </svg>
@@ -716,7 +738,7 @@
                                 </div>
                             </div>
                             <div class="flex gap-2">
-                                <a href="/api/v1/words/by-variant/lit" target="_blank" class="flex-1 inline-flex items-center justify-center gap-2 rounded-lg bg-blue-500 px-4 py-2 text-sm font-medium text-white transition hover:bg-blue-600">
+                                <a href="/api/v1/words/by-variant/lit" target="_blank" rel="noopener noreferrer" class="flex-1 inline-flex items-center justify-center gap-2 rounded-lg bg-blue-500 px-4 py-2 text-sm font-medium text-white transition hover:bg-blue-600">
                                     <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"></path>
                                     </svg>
@@ -755,7 +777,7 @@
                                 </div>
                             </div>
                             <div class="flex gap-2">
-                                <a href="/api/v1/phrases?q=take&limit=10" target="_blank" class="flex-1 inline-flex items-center justify-center gap-2 rounded-lg bg-blue-500 px-4 py-2 text-sm font-medium text-white transition hover:bg-blue-600">
+                                <a href="/api/v1/phrases?q=take&limit=10" target="_blank" rel="noopener noreferrer" class="flex-1 inline-flex items-center justify-center gap-2 rounded-lg bg-blue-500 px-4 py-2 text-sm font-medium text-white transition hover:bg-blue-600">
                                     <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"></path>
                                     </svg>
@@ -787,11 +809,11 @@
                             <div class="rounded-lg bg-slate-50 border border-slate-200 p-4">
                                 <span class="text-xs text-slate-600 font-semibold">参数说明</span>
                                 <div class="mt-2 space-y-1.5 text-xs text-slate-600">
-                                    <div class="flex gap-2"><code class="text-blue-600">q</code> - 模糊匹配关键词（必需，最少 3 个字符）</div>
+                                    <div class="flex gap-2"><code class="text-blue-600">q</code> - 模糊匹配关键词（必需，规范化后至少 3 个字符；会先去首尾空白、转小写并移除空格/连字符/下划线）</div>
                                     <div class="flex gap-2"><code class="text-blue-600">limit</code> - 返回数量（默认 20，最大 100）</div>
                                     <div class="flex gap-2"><code class="text-blue-600">offset</code> - 偏移量（默认 0）</div>
                                     <div class="flex gap-2"><code class="text-blue-600">pos</code> - 词性过滤（noun, verb 等）</div>
-                                    <div class="flex gap-2"><code class="text-blue-600">cefr_level</code> - CEFR 等级（0-6，如 3=B1）</div>
+                                    <div class="flex gap-2"><code class="text-blue-600">cefr_level</code> - CEFR 等级（A1, A2, B1, B2, C1, C2）</div>
                                     <div class="flex gap-2"><code class="text-blue-600">oxford_level</code> - 牛津等级（1=3000, 2=5000）</div>
                                     <div class="flex gap-2"><code class="text-blue-600">cet_level</code> - 四六级（4=CET-4, 6=CET-6）</div>
                                     <div class="flex gap-2"><code class="text-blue-600">max_frequency_rank</code> - 最大词频排名（如 5000）</div>
@@ -799,7 +821,7 @@
                                 </div>
                             </div>
                             <div>
-                                <a href="/api/v1/search?q=test&limit=10" target="_blank" class="inline-flex w-full sm:w-auto items-center justify-center gap-2 rounded-lg bg-blue-500 px-4 py-2 text-sm font-medium text-white transition hover:bg-blue-600">
+                                <a href="/api/v1/search?q=test&limit=10" target="_blank" rel="noopener noreferrer" class="inline-flex w-full sm:w-auto items-center justify-center gap-2 rounded-lg bg-blue-500 px-4 py-2 text-sm font-medium text-white transition hover:bg-blue-600">
                                     测试搜索
                                 </a>
                             </div>
@@ -828,9 +850,9 @@
                             <div class="rounded-lg bg-slate-50 border border-slate-200 p-4">
                                 <span class="text-xs text-slate-600 font-semibold">参数说明</span>
                                 <div class="mt-2 space-y-1.5 text-xs text-slate-600">
-                                    <div class="flex gap-2"><code class="text-blue-600">prefix</code> - 单词前缀（必需，最少 3 个字符，最多 50 个字符）</div>
+                                    <div class="flex gap-2"><code class="text-blue-600">prefix</code> - 单词前缀（必需，规范化后至少 3 个字符；去首尾空白后最多 50 个字符）</div>
                                     <div class="flex gap-2"><code class="text-blue-600">limit</code> - 返回数量（默认 10，最大 50）</div>
-                                    <div class="flex gap-2"><code class="text-blue-600">cefr_level</code> - CEFR 等级（0-6）</div>
+                                    <div class="flex gap-2"><code class="text-blue-600">cefr_level</code> - CEFR 等级（A1, A2, B1, B2, C1, C2）</div>
                                     <div class="flex gap-2"><code class="text-blue-600">oxford_level</code> - 牛津等级（1=3000, 2=5000）</div>
                                     <div class="flex gap-2"><code class="text-blue-600">cet_level</code> - 四六级（4=CET-4, 6=CET-6）</div>
                                     <div class="flex gap-2"><code class="text-blue-600">max_frequency_rank</code> - 最大词频排名</div>
@@ -838,7 +860,7 @@
                                 </div>
                             </div>
                             <div>
-                                <a href="/api/v1/suggest?prefix=exa&limit=10" target="_blank" class="inline-flex w-full sm:w-auto items-center justify-center gap-2 rounded-lg bg-blue-500 px-4 py-2 text-sm font-medium text-white transition hover:bg-blue-600">
+                                <a href="/api/v1/suggest?prefix=exa&limit=10" target="_blank" rel="noopener noreferrer" class="inline-flex w-full sm:w-auto items-center justify-center gap-2 rounded-lg bg-blue-500 px-4 py-2 text-sm font-medium text-white transition hover:bg-blue-600">
                                     测试补全
                                 </a>
                             </div>
@@ -897,9 +919,9 @@
             <div class="mt-8 flex flex-col sm:flex-row items-center justify-between gap-4 rounded-2xl border border-slate-200/80 bg-gradient-to-br from-white to-slate-50/50 px-6 py-5">
                 <div class="text-center sm:text-left">
                     <h5 class="text-sm font-semibold text-slate-900">需要更多接口信息？</h5>
-                    <p class="mt-1 text-xs text-slate-500">查看完整 API 文档，了解所有 9 个端点的详细参数、响应格式和错误码</p>
+                    <p class="mt-1 text-xs text-slate-500">查看完整 API 文档，了解全部 <span x-text="apiBusinessEndpointCount"></span> 个业务端点与 <span x-text="apiHealthEndpointCount"></span> 个健康检查端点的详细参数、响应格式和错误码</p>
                 </div>
-                <a href="https://github.com/simp-lee/isdict-api/blob/main/README.zh-CN.md" target="_blank" class="flex-shrink-0 inline-flex items-center gap-2 rounded-lg bg-slate-900 px-5 py-2.5 text-sm font-medium text-white transition hover:bg-slate-800">
+                <a href="https://github.com/simp-lee/isdict-api/blob/main/api.zh-CN.md" target="_blank" rel="noopener noreferrer" class="flex-shrink-0 inline-flex items-center gap-2 rounded-lg bg-slate-900 px-5 py-2.5 text-sm font-medium text-white transition hover:bg-slate-800">
                     <svg class="h-4 w-4" fill="currentColor" viewBox="0 0 24 24">
                         <path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"/>
                     </svg>
@@ -1030,7 +1052,7 @@
                                     <svg class="mt-0.5 h-3.5 w-3.5 flex-shrink-0 text-cyan-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/>
                                     </svg>
-                                    <span>8 个 RESTful 端点，覆盖查询、搜索、补全等场景</span>
+                                    <span>8 个业务端点 + 2 个健康检查端点，覆盖查询、搜索、补全与服务探活场景</span>
                                 </li>
                                 <li class="flex items-start gap-2">
                                     <svg class="mt-0.5 h-3.5 w-3.5 flex-shrink-0 text-cyan-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -1166,7 +1188,7 @@
                         <span>·</span>
                         <span>六大数据源</span>
                         <span>·</span>
-                        <a href="https://github.com/simp-lee/isdict-api" target="_blank" class="text-red-600 hover:underline">开源项目</a>
+                        <a href="https://github.com/simp-lee/isdict-api" target="_blank" rel="noopener noreferrer" class="text-red-600 hover:underline">开源项目</a>
                     </div>
                 </div>
             </div>
@@ -1199,7 +1221,7 @@
                         </div>
                         <ul class="mt-4 space-y-2 text-xs text-slate-600">
                             <li>
-                                <a href="https://github.com/simp-lee/isdict-api" target="_blank" class="group inline-flex items-center justify-between gap-2 w-full rounded-lg border border-transparent px-3 py-2 transition hover:border-red-200 hover:bg-rose-50">
+                                <a href="https://github.com/simp-lee/isdict-api" target="_blank" rel="noopener noreferrer" class="group inline-flex items-center justify-between gap-2 w-full rounded-lg border border-transparent px-3 py-2 transition hover:border-red-200 hover:bg-rose-50">
                                     <span class="group-hover:text-red-600">GitHub 仓库</span>
                                     <svg class="h-3.5 w-3.5 text-slate-400 group-hover:text-red-500" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
                                         <path d="M7 5h8v8" />
@@ -1208,7 +1230,7 @@
                                 </a>
                             </li>
                             <li>
-                                <a href="https://github.com/simp-lee/isdict-api/blob/main/README.zh-CN.md" target="_blank" class="group inline-flex items-center justify-between gap-2 w-full rounded-lg border border-transparent px-3 py-2 transition hover:border-red-200 hover:bg-rose-50">
+                                <a href="https://github.com/simp-lee/isdict-api/blob/main/README.zh-CN.md" target="_blank" rel="noopener noreferrer" class="group inline-flex items-center justify-between gap-2 w-full rounded-lg border border-transparent px-3 py-2 transition hover:border-red-200 hover:bg-rose-50">
                                     <span class="group-hover:text-red-600">项目文档</span>
                                     <svg class="h-3.5 w-3.5 text-slate-400 group-hover:text-red-500" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
                                         <path d="M7 5h8v8" />
@@ -1217,7 +1239,7 @@
                                 </a>
                             </li>
                             <li>
-                                <a href="https://github.com/simp-lee/isdict-api/blob/main/api.zh-CN.md" target="_blank" class="group inline-flex items-center justify-between gap-2 w-full rounded-lg border border-transparent px-3 py-2 transition hover:border-red-200 hover:bg-rose-50">
+                                <a href="https://github.com/simp-lee/isdict-api/blob/main/api.zh-CN.md" target="_blank" rel="noopener noreferrer" class="group inline-flex items-center justify-between gap-2 w-full rounded-lg border border-transparent px-3 py-2 transition hover:border-red-200 hover:bg-rose-50">
                                     <span class="group-hover:text-red-600">API 文档</span>
                                     <svg class="h-3.5 w-3.5 text-slate-400 group-hover:text-red-500" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
                                         <path d="M7 5h8v8" />
@@ -1288,9 +1310,32 @@
     <script>
         function dictionaryApp() {
             const createCache = () => Object.create(null);
+            const apiEndpointCatalog = Object.freeze({
+                business: Object.freeze([
+                    'GET /words/:headword',
+                    'GET /words/:headword/pronunciations',
+                    'GET /words/:headword/senses',
+                    'GET /words/by-variant/:variant',
+                    'POST /words/batch',
+                    'GET /search',
+                    'GET /suggest',
+                    'GET /phrases'
+                ]),
+                health: Object.freeze([
+                    'GET /health',
+                    'GET /api/v1/health'
+                ])
+            });
 
             return {
                 apiBaseURL: '/api/v1',
+                apiEndpointCatalog,
+                get apiBusinessEndpointCount() {
+                    return this.apiEndpointCatalog.business.length;
+                },
+                get apiHealthEndpointCount() {
+                    return this.apiEndpointCatalog.health.length;
+                },
                 searchQuery: '',
                 currentWord: null,
                 suggestions: [],
@@ -1299,6 +1344,7 @@
                 showSuggestions: false,
                 loading: false,
                 error: null,
+                errorType: null,
                 hasSearched: false,
                 exampleWords: ['hello', 'study', 'beautiful', 'important', 'knowledge'],
                 examplePhrases: ['look forward to', 'take care of', 'come up with'],
@@ -1307,21 +1353,40 @@
                 pendingPhraseController: null,
                 suggestionCache: createCache(),
                 wordCache: createCache(),
+                variantCandidateCache: createCache(),
                 phraseCache: createCache(),
                 activeSearchToken: 0,
+                variantCandidates: [],
+                activeVariantQuery: '',
 
                 init() {
+                    window.addEventListener('popstate', this.handlePopState.bind(this));
                     const urlParams = new URLSearchParams(window.location.search);
                     const word = urlParams.get('word');
                     if (word) {
                         this.searchQuery = word;
-                        this.performSearch();
+                            this.performSearch({ pushHistory: false });
                     }
                 },
 
-                resetToHome() {
+                handlePopState() {
+                    const urlParams = new URLSearchParams(window.location.search);
+                    const word = urlParams.get('word');
+
+                    if (word) {
+                        this.searchQuery = word;
+                        this.performSearch({ pushHistory: false });
+                        return;
+                    }
+
+                    this.resetToHome({ pushHistory: false });
+                },
+
+                resetToHome(options = {}) {
+                    const { pushHistory = true } = options;
                     this.currentWord = null;
                     this.error = null;
+                    this.errorType = null;
                     this.searchQuery = '';
                     this.hasSearched = false;
                     this.loading = false;
@@ -1329,12 +1394,16 @@
                     this.suggestions = [];
                     this.searchResults = [];
                     this.relatedPhrases = [];
+                    this.variantCandidates = [];
+                    this.activeVariantQuery = '';
                     clearTimeout(this.suggestTimer);
                     this.suggestTimer = null;
                     this.abortSuggestionFetch();
                     this.abortPhraseFetch();
                     this.activeSearchToken++;
-                    window.history.pushState({}, '', window.location.pathname);
+                    if (pushHistory) {
+                        window.history.pushState({}, '', window.location.pathname);
+                    }
                     
                     document.title = '易思词典';
                 },
@@ -1348,7 +1417,7 @@
                         this.suggestions = [];
                         return;
                     }
-                    if (!rawQuery.includes(' ') && normalized.length < 3) {
+                    if (!this.isPhraseQuery(rawQuery) && this.getNormalizedQueryLength(rawQuery) < 3) {
                         this.abortSuggestionFetch();
                         this.suggestions = [];
                         return;
@@ -1361,18 +1430,18 @@
                 async fetchSuggestions(prefix) {
                     const controller = new AbortController();
                     try {
-                        const normalized = this.normalizeKey(prefix);
-                        if (!normalized) {
+                        const cacheKey = this.buildSuggestionCacheKey(prefix);
+                        if (!cacheKey) {
                             this.suggestions = [];
                             return;
                         }
 
-                        if (!prefix.includes(' ') && normalized.length < 3) {
+                        if (!this.isPhraseQuery(prefix) && this.getNormalizedQueryLength(prefix) < 3) {
                             this.suggestions = [];
                             return;
                         }
 
-                        const cached = this.suggestionCache[normalized];
+                        const cached = this.suggestionCache[cacheKey];
                         if (cached) {
                             this.suggestions = this.cloneData(cached);
                             return;
@@ -1381,12 +1450,13 @@
                         this.abortSuggestionFetch();
                         this.pendingSuggestionController = controller;
 
-                        const url = prefix.includes(' ')
+                        const url = this.isPhraseQuery(prefix)
                             ? `${this.apiBaseURL}/phrases?q=${encodeURIComponent(prefix)}&limit=10`
                             : `${this.apiBaseURL}/suggest?prefix=${encodeURIComponent(prefix)}&limit=10`;
 
                         const response = await fetch(url, { signal: controller.signal });
                         if (!response.ok) {
+                            this.clearSuggestionsFor(cacheKey, controller);
                             return;
                         }
 
@@ -1396,13 +1466,15 @@
                         }
 
                         const suggestions = data.success && Array.isArray(data.data) ? data.data : [];
-                        this.suggestionCache[normalized] = this.cloneData(suggestions);
-                        if (this.normalizeKey(this.searchQuery) === normalized) {
+                        this.suggestionCache[cacheKey] = this.cloneData(suggestions);
+                        if (this.shouldUpdateSuggestions(cacheKey, controller)) {
                             this.suggestions = this.cloneData(suggestions);
                         }
                     } catch (err) {
                         if (err.name !== 'AbortError') {
                             console.error('获取建议失败:', err);
+                            const cacheKey = this.buildSuggestionCacheKey(prefix);
+                            this.clearSuggestionsFor(cacheKey, controller);
                         }
                     } finally {
                         if (controller === this.pendingSuggestionController) {
@@ -1420,66 +1492,172 @@
                     this.performSearch();
                 },
 
-                async performSearch() {
+                async performSearch(options = {}) {
+                    const { pushHistory = true } = options;
                     clearTimeout(this.suggestTimer);
                     const rawQuery = this.searchQuery.trim();
                     const normalized = this.normalizeKey(rawQuery);
+                    const queryCacheKey = this.buildWordQueryCacheKey(rawQuery);
+                    const canonicalCacheKey = this.buildHeadwordCacheKey(rawQuery);
                     if (!normalized) {
                         return;
                     }
 
                     this.loading = true;
                     this.error = null;
+                    this.errorType = null;
                     this.currentWord = null;
                     this.searchResults = [];
                     this.relatedPhrases = [];
+                    this.variantCandidates = [];
+                    this.activeVariantQuery = '';
                     this.hasSearched = true;
                     this.showSuggestions = false;
                     this.suggestions = [];
                     this.abortSuggestionFetch();
-                    window.history.pushState({}, '', `?word=${encodeURIComponent(rawQuery)}`);
+                    if (pushHistory) {
+                        window.history.pushState({}, '', `?word=${encodeURIComponent(rawQuery)}`);
+                    }
+                    this.setSearchStateTitle(rawQuery);
 
                     const token = ++this.activeSearchToken;
                     this.abortPhraseFetch();
 
                     try {
-                        const cachedWord = this.getCachedWord(normalized);
-                        if (cachedWord) {
-                            this.setWordResult(cachedWord, normalized, token);
+                        const cachedQueryWord = this.getCachedWord(queryCacheKey);
+                        const cachedVariantCandidates = this.getCachedVariantCandidates(queryCacheKey);
+                        if (cachedQueryWord) {
+                            this.variantCandidates = cachedVariantCandidates;
+                            this.activeVariantQuery = cachedVariantCandidates.length ? rawQuery : '';
+                            const cachedCanonicalWord = cachedQueryWord.headword
+                                ? this.getCachedWord(this.buildHeadwordCacheKey(cachedQueryWord.headword))
+                                : null;
+                            this.setWordResult(cachedQueryWord, queryCacheKey, token, cachedCanonicalWord);
+                            return;
+                        }
+
+                        const cachedCanonicalWord = this.getCachedWord(canonicalCacheKey);
+                        if (cachedCanonicalWord) {
+                            this.variantCandidates = [];
+                            this.activeVariantQuery = '';
+                            delete this.variantCandidateCache[queryCacheKey];
+                            this.setWordResult(cachedCanonicalWord, queryCacheKey, token, cachedCanonicalWord);
                             return;
                         }
 
                         let response = await fetch(`${this.apiBaseURL}/words/${encodeURIComponent(rawQuery)}`);
+                        let data = await this.readAPIResponse(response);
 
-                        if (response.status === 404) {
-                            const variantResponse = await fetch(`${this.apiBaseURL}/words/by-variant/${encodeURIComponent(rawQuery)}`);
-                            if (variantResponse.ok) {
-                                const variantData = await variantResponse.json();
-                                if (variantData.success && Array.isArray(variantData.data) && variantData.data.length) {
-                                    this.setWordResult(variantData.data[0], normalized, token);
-                                    return;
-                                }
-                            }
+                        if (response.ok && data.success && data.data) {
+                            this.variantCandidates = [];
+                            this.activeVariantQuery = '';
+                            delete this.variantCandidateCache[queryCacheKey];
+                            this.setWordResult(data.data, queryCacheKey, token, data.data);
+                            return;
                         }
 
                         if (response.ok) {
-                            const data = await response.json();
-                            if (data.success && data.data) {
-                                this.setWordResult(data.data, normalized, token);
+                            if (token === this.activeSearchToken) {
+                                this.setError(this.getAPIErrorMessage(data, '词条数据格式错误，请稍后重试'), 'server');
+                            }
+                            return;
+                        }
+
+                        if (response.status === 404) {
+                            const variantResponse = await fetch(`${this.apiBaseURL}/words/by-variant/${encodeURIComponent(rawQuery)}`);
+                            const variantData = await this.readAPIResponse(variantResponse);
+                            if (variantResponse.ok) {
+                                if (variantData.success && Array.isArray(variantData.data) && variantData.data.length) {
+                                    if (variantData.data.length > 1) {
+                                        this.variantCandidates = this.cloneData(variantData.data);
+                                        this.activeVariantQuery = rawQuery;
+                                        if (queryCacheKey) {
+                                            this.variantCandidateCache[queryCacheKey] = this.cloneData(variantData.data);
+                                        }
+                                    } else {
+                                        this.variantCandidates = [];
+                                        this.activeVariantQuery = '';
+                                        delete this.variantCandidateCache[queryCacheKey];
+                                    }
+
+                                    await this.selectVariantCandidate(variantData.data[0], {
+                                        rawQuery,
+                                        queryCacheKey,
+                                        token
+                                    });
+                                    return;
+                                }
+                            } else if (variantResponse.status !== 404 && token === this.activeSearchToken) {
+                                this.setError(this.getAPIErrorMessage(variantData, '变体查询失败，请稍后重试'), this.getErrorTypeForStatus(variantResponse.status));
+                                return;
+                            }
+
+                            if (this.isPhraseQuery(rawQuery)) {
+                                const phraseResponse = await fetch(`${this.apiBaseURL}/phrases?q=${encodeURIComponent(rawQuery)}&limit=10`);
+                                const phraseData = await this.readAPIResponse(phraseResponse);
+                                if (phraseResponse.ok && phraseData.success && Array.isArray(phraseData.data) && phraseData.data.length) {
+                                    const exactPhrase = phraseData.data.find((item) => this.buildExactPhraseMatchKey(item.headword) === this.buildExactPhraseMatchKey(rawQuery));
+                                    if (exactPhrase && exactPhrase.headword) {
+                                        const phraseDetailResponse = await fetch(`${this.apiBaseURL}/words/${encodeURIComponent(exactPhrase.headword)}`);
+                                        const phraseDetailData = await this.readAPIResponse(phraseDetailResponse);
+                                        if (phraseDetailResponse.ok && phraseDetailData.success && phraseDetailData.data) {
+                                            this.setWordResult(phraseDetailData.data, queryCacheKey, token, phraseDetailData.data);
+                                            return;
+                                        }
+
+                                        if (phraseDetailResponse.status !== 404 && token === this.activeSearchToken) {
+                                            this.setError(this.getAPIErrorMessage(phraseDetailData, '短语详情暂时不可用，请稍后重试'), this.getErrorTypeForStatus(phraseDetailResponse.status));
+                                            return;
+                                        }
+                                    } else if (token === this.activeSearchToken) {
+                                        this.searchResults = this.cloneData(phraseData.data);
+                                    }
+                                } else if (!phraseResponse.ok && token === this.activeSearchToken) {
+                                    this.setError(this.getAPIErrorMessage(phraseData, '短语查询失败，请稍后重试'), this.getErrorTypeForStatus(phraseResponse.status));
+                                    return;
+                                }
+
+                                if (token === this.activeSearchToken) {
+                                    this.setError(`未找到 "${rawQuery}"`, 'not-found');
+                                }
                                 return;
                             }
                         }
 
+                        if (!response.ok && response.status !== 404) {
+                            if (token === this.activeSearchToken) {
+                                this.setError(this.getAPIErrorMessage(data, '查询失败，请稍后重试'), this.getErrorTypeForStatus(response.status));
+                            }
+                            return;
+                        }
+
+                        const validationMessage = this.validateNormalizedQuery(rawQuery);
+                        if (validationMessage) {
+                            if (token === this.activeSearchToken) {
+                                this.setError(validationMessage, 'validation');
+                            }
+                            return;
+                        }
+
                         const searchResponse = await fetch(`${this.apiBaseURL}/search?q=${encodeURIComponent(rawQuery)}&limit=10`);
+                        const searchData = await this.readAPIResponse(searchResponse);
                         if (searchResponse.ok) {
-                            const searchData = await searchResponse.json();
                             if (token === this.activeSearchToken && searchData.success && Array.isArray(searchData.data)) {
                                 this.searchResults = searchData.data;
+                            } else if (token === this.activeSearchToken) {
+                                this.setError(this.getAPIErrorMessage(searchData, '搜索结果格式错误，请稍后重试'), 'server');
+                                return;
                             }
+                        } else if (token === this.activeSearchToken) {
+                            const fallbackMessage = searchResponse.status === 400
+                                ? '查询参数无效'
+                                : '搜索服务暂时不可用，请稍后重试';
+                            this.setError(this.getAPIErrorMessage(searchData, fallbackMessage), this.getErrorTypeForStatus(searchResponse.status));
+                            return;
                         }
 
                         if (token === this.activeSearchToken) {
-                            this.error = `未找到 "${rawQuery}"`;
+                            this.setError(`未找到 "${rawQuery}"`, 'not-found');
                             if (this.searchResults.length) {
                                 this.hasSearched = true;
                             }
@@ -1489,7 +1667,7 @@
                             console.error('搜索失败:', err);
                         }
                         if (token === this.activeSearchToken) {
-                            this.error = '网络错误，请检查连接';
+                            this.setError('网络连接失败，请检查连接后重试', 'network');
                         }
                     } finally {
                         if (token === this.activeSearchToken) {
@@ -1499,12 +1677,12 @@
                 },
 
                 async fetchRelatedPhrases(headword, token = this.activeSearchToken) {
-                    const normalized = this.normalizeKey(headword);
-                    if (!normalized) {
+                    const cacheKey = this.buildPhraseCacheKey(headword);
+                    if (!cacheKey) {
                         return;
                     }
 
-                    const cached = this.phraseCache[normalized];
+                    const cached = this.phraseCache[cacheKey];
                     if (cached) {
                         if (token === this.activeSearchToken) {
                             this.relatedPhrases = this.cloneData(cached);
@@ -1528,7 +1706,7 @@
                         }
 
                         const phrases = result.success && Array.isArray(result.data) ? result.data : [];
-                        this.phraseCache[normalized] = this.cloneData(phrases);
+                        this.phraseCache[cacheKey] = this.cloneData(phrases);
                         if (token === this.activeSearchToken) {
                             this.relatedPhrases = this.cloneData(phrases);
                         }
@@ -1547,6 +1725,15 @@
                     return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
                 },
 
+                escapeHTML(value) {
+                    return String(value)
+                        .replace(/&/g, '&amp;')
+                        .replace(/</g, '&lt;')
+                        .replace(/>/g, '&gt;')
+                        .replace(/"/g, '&quot;')
+                        .replace(/'/g, '&#39;');
+                },
+
                 formatTranslation(text) {
                     if (!text) return text;
                     // 将换行符替换为 "；" 分隔符，让翻译更易读
@@ -1554,8 +1741,13 @@
                 },
 
                 highlightWord(text, word) {
-                    if (!text || !word) {
-                        return text;
+                    if (!text) {
+                        return '';
+                    }
+
+                    const safeText = this.escapeHTML(text);
+                    if (!word) {
+                        return safeText;
                     }
 
                     const wordsToHighlight = [word];
@@ -1581,11 +1773,11 @@
                     const escapedWords = wordsToHighlight.map((item) => this.escapeRegExp(item));
                     const pattern = escapedWords.join('|');
                     if (!pattern) {
-                        return text;
+                        return safeText;
                     }
                     const regex = new RegExp(`\\b(${pattern})\\b`, 'gi');
 
-                    return text.replace(regex, '<span class="highlight">$1</span>');
+                    return safeText.replace(regex, '<span class="highlight">$1</span>');
                 },
 
                 getGroupedSenses() {
@@ -1613,21 +1805,34 @@
                     });
                 },
 
+                normalizeCEFRLevel(level) {
+                    if (typeof level !== 'string') {
+                        return '';
+                    }
+
+                    const normalized = level.trim().toUpperCase();
+                    const validLevels = ['A1', 'A2', 'B1', 'B2', 'C1', 'C2'];
+                    return validLevels.includes(normalized) ? normalized : '';
+                },
+
+                hasCEFRLevel(level) {
+                    return this.normalizeCEFRLevel(level) !== '';
+                },
+
                 getCEFRLevelText(level) {
-                    const levels = ['', 'A1', 'A2', 'B1', 'B2', 'C1', 'C2'];
-                    return levels[level] || '';
+                    return this.normalizeCEFRLevel(level);
                 },
 
                 getCEFRBadgeClass(level) {
                     const classes = {
-                        1: 'bg-green-100 text-green-800',
-                        2: 'bg-green-200 text-green-900',
-                        3: 'bg-yellow-100 text-yellow-800',
-                        4: 'bg-orange-100 text-orange-800',
-                        5: 'bg-red-100 text-red-800',
-                        6: 'bg-purple-100 text-purple-800'
+                        A1: 'bg-green-100 text-green-800',
+                        A2: 'bg-green-200 text-green-900',
+                        B1: 'bg-yellow-100 text-yellow-800',
+                        B2: 'bg-orange-100 text-orange-800',
+                        C1: 'bg-red-100 text-red-800',
+                        C2: 'bg-purple-100 text-purple-800'
                     };
-                    return classes[level] || 'bg-slate-100 text-slate-600';
+                    return classes[this.normalizeCEFRLevel(level)] || 'bg-slate-100 text-slate-600';
                 },
 
                 getOxfordLevelText(level) {
@@ -1772,7 +1977,169 @@
                 },
 
                 normalizeKey(value) {
-                    return (value || '').trim().toLowerCase();
+                    return (value || '')
+                        .trim()
+                        .toLowerCase()
+                        .replace(/[\u2018\u2019]/g, "'")
+                        .replace(/[- _]/g, '');
+                },
+
+                normalizeLookupKey(value) {
+                    return (value || '').trim();
+                },
+
+                buildExactPhraseMatchKey(value) {
+                    return this.normalizeLookupKey(value)
+                        .toLowerCase()
+                        .replace(/[\u2018\u2019]/g, "'");
+                },
+
+                isCurrentVariantCandidate(candidate) {
+                    return Boolean(candidate?.headword) && this.currentWord?.headword === candidate.headword;
+                },
+
+                buildSuggestionCacheKey(value) {
+                    const normalized = this.normalizeKey(value);
+                    if (!normalized) {
+                        return '';
+                    }
+                    return `${this.isPhraseQuery(value) ? 'phrase' : 'word'}:${normalized}`;
+                },
+
+                buildWordQueryCacheKey(value) {
+                    const normalized = this.normalizeLookupKey(value);
+                    return normalized ? `query:${normalized}` : '';
+                },
+
+                buildHeadwordCacheKey(value) {
+                    const exact = this.normalizeLookupKey(value);
+                    return exact ? `headword:${exact}` : '';
+                },
+
+                buildPhraseCacheKey(value) {
+                    const normalized = this.normalizeLookupKey(value).toLowerCase();
+                    return normalized ? `phrase:${normalized}` : '';
+                },
+
+                getNormalizedQueryLength(value) {
+                    return Array.from(this.normalizeKey(value)).length;
+                },
+
+                isPhraseQuery(value) {
+                    return /\s/.test((value || '').trim());
+                },
+
+                validateNormalizedQuery(value) {
+                    if (this.getNormalizedQueryLength(value) < 3) {
+                        return '查询参数规范化后至少需要 3 个字符';
+                    }
+                    return '';
+                },
+
+                async readAPIResponse(response) {
+                    try {
+                        return await response.json();
+                    } catch (_err) {
+                        return {};
+                    }
+                },
+
+                getAPIErrorMessage(payload, fallbackMessage) {
+                    const message = payload?.error?.message;
+                    return typeof message === 'string' && message.trim() ? message.trim() : fallbackMessage;
+                },
+
+                getErrorTypeForStatus(status) {
+                    if (status === 400) {
+                        return 'validation';
+                    }
+                    if (status === 408) {
+                        return 'timeout';
+                    }
+                    if (status === 429) {
+                        return 'rate-limit';
+                    }
+                    if (status >= 500) {
+                        return 'server';
+                    }
+                    return 'not-found';
+                },
+
+                getErrorTitle() {
+                    if (this.errorType === 'validation') {
+                        return '参数校验失败';
+                    }
+                    if (this.errorType === 'timeout') {
+                        return '请求超时';
+                    }
+                    if (this.errorType === 'rate-limit') {
+                        return '请求过于频繁';
+                    }
+                    if (this.errorType === 'server') {
+                        return '服务暂时不可用';
+                    }
+                    if (this.errorType === 'network') {
+                        return '网络连接失败';
+                    }
+                    return '未找到单词';
+                },
+
+                setError(message, type = 'not-found') {
+                    this.error = message;
+                    this.errorType = type;
+                    this.setSearchStateTitle(this.searchQuery);
+                },
+
+                setSearchStateTitle(query) {
+                    const rawQuery = (query || '').trim();
+                    document.title = rawQuery ? `搜索 ${rawQuery} - 易思词典` : '易思词典';
+                },
+
+                getCachedVariantCandidates(key) {
+                    const cached = this.variantCandidateCache[key];
+                    return Array.isArray(cached) ? this.cloneData(cached) : [];
+                },
+
+                shouldUpdateSuggestions(cacheKey, controller) {
+                    return controller === this.pendingSuggestionController && this.buildSuggestionCacheKey(this.searchQuery) === cacheKey;
+                },
+
+                clearSuggestionsFor(cacheKey, controller) {
+                    if (this.shouldUpdateSuggestions(cacheKey, controller)) {
+                        this.suggestions = [];
+                    }
+                },
+
+                hasFullWordDetail(wordData) {
+                    if (!wordData) {
+                        return false;
+                    }
+                    return !Object.prototype.hasOwnProperty.call(wordData, 'variant_info') || Object.prototype.hasOwnProperty.call(wordData, 'variants');
+                },
+
+                resolveQueriedVariant(variantWordData, rawQuery) {
+                    const variantInfo = Array.isArray(variantWordData?.variant_info) ? variantWordData.variant_info : [];
+                    const normalizedQuery = this.normalizeKey(rawQuery);
+                    const matchedVariant = variantInfo.find((variant) => this.normalizeKey(variant?.variant_text) === normalizedQuery) || variantInfo[0];
+                    if (!matchedVariant && !rawQuery) {
+                        return null;
+                    }
+                    return {
+                        text: matchedVariant?.variant_text || rawQuery,
+                        frequency_rank: matchedVariant?.frequency_rank || 0,
+                        frequency_count: matchedVariant?.frequency_count || 0
+                    };
+                },
+
+                attachVariantContext(wordData, variantWordData, rawQuery) {
+                    const result = this.cloneData(wordData);
+                    if (!result.queried_variant) {
+                        const queriedVariant = this.resolveQueriedVariant(variantWordData, rawQuery);
+                        if (queriedVariant) {
+                            result.queried_variant = queriedVariant;
+                        }
+                    }
+                    return result;
                 },
 
                 cloneData(data) {
@@ -1791,25 +2158,85 @@
                     return cached ? this.cloneData(cached) : null;
                 },
 
-                setWordResult(wordData, normalizedKey, token) {
+                async resolveVariantCandidateWord(candidate, rawQuery, token) {
+                    const headwordKey = this.buildHeadwordCacheKey(candidate?.headword);
+                    const cachedCanonicalWord = headwordKey ? this.getCachedWord(headwordKey) : null;
+                    if (cachedCanonicalWord) {
+                        return {
+                            resolvedWord: this.attachVariantContext(cachedCanonicalWord, candidate, rawQuery),
+                            canonicalWord: cachedCanonicalWord
+                        };
+                    }
+
+                    if (this.hasFullWordDetail(candidate)) {
+                        return {
+                            resolvedWord: this.attachVariantContext(candidate, candidate, rawQuery),
+                            canonicalWord: candidate
+                        };
+                    }
+
+                    const detailResponse = await fetch(`${this.apiBaseURL}/words/${encodeURIComponent(candidate.headword)}`);
+                    const detailData = await this.readAPIResponse(detailResponse);
+                    if (detailResponse.ok && detailData.success && detailData.data) {
+                        return {
+                            resolvedWord: this.attachVariantContext(detailData.data, candidate, rawQuery),
+                            canonicalWord: detailData.data
+                        };
+                    }
+
+                    if (detailResponse.status !== 404 && token === this.activeSearchToken) {
+                        this.setError(this.getAPIErrorMessage(detailData, '词条详情暂时不可用，请稍后重试'), this.getErrorTypeForStatus(detailResponse.status));
+                        return {
+                            resolvedWord: null,
+                            canonicalWord: null
+                        };
+                    }
+
+                    return {
+                        resolvedWord: this.attachVariantContext(candidate, candidate, rawQuery),
+                        canonicalWord: null
+                    };
+                },
+
+                async selectVariantCandidate(candidate, options = {}) {
+                    if (!candidate || !candidate.headword) {
+                        return;
+                    }
+
+                    const rawQuery = options.rawQuery || this.activeVariantQuery;
+                    const queryCacheKey = options.queryCacheKey || this.buildWordQueryCacheKey(rawQuery);
+                    const token = typeof options.token === 'number' ? options.token : ++this.activeSearchToken;
+                    const { resolvedWord, canonicalWord } = await this.resolveVariantCandidateWord(candidate, rawQuery, token);
+                    if (!resolvedWord) {
+                        return;
+                    }
+
+                    this.setWordResult(resolvedWord, queryCacheKey, token, canonicalWord);
+                },
+
+                setWordResult(wordData, queryCacheKey, token, canonicalWordData = wordData) {
                     if (typeof token === 'number' && token !== this.activeSearchToken) {
                         return;
                     }
                     const result = this.cloneData(wordData);
                     this.currentWord = result;
+                    this.errorType = null;
 
-                    if (normalizedKey) {
-                        this.wordCache[normalizedKey] = this.cloneData(result);
+                    if (queryCacheKey) {
+                        this.wordCache[queryCacheKey] = this.cloneData(result);
                     }
-                    if (result?.headword) {
-                        const headwordKey = this.normalizeKey(result.headword);
+                    const canonicalResult = canonicalWordData ? this.cloneData(canonicalWordData) : null;
+                    if (canonicalResult?.headword && !canonicalResult.queried_variant && this.hasFullWordDetail(canonicalResult)) {
+                        const headwordKey = this.buildHeadwordCacheKey(canonicalResult.headword);
                         if (headwordKey) {
-                            this.wordCache[headwordKey] = this.cloneData(result);
+                            this.wordCache[headwordKey] = this.cloneData(canonicalResult);
                         }
-                        
-                        const headword = result.headword;
-                        const translation = result.translation_zh || '';
-                        const formattedTranslation = this.formatTranslation(translation);
+                    }
+
+                    const headword = result?.headword;
+                    const translation = result?.translation_zh || '';
+                    const formattedTranslation = this.formatTranslation(translation);
+                    if (headword) {
                         document.title = `${headword} - 易思词典${formattedTranslation ? ' | ' + formattedTranslation : ''}`;
                     }
 

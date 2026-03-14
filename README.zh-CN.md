@@ -2,192 +2,187 @@
 
 [English](README.md) | 中文
 
-[![Go Version](https://img.shields.io/badge/go-1.24-blue.svg)](https://golang.org)
+[![Go Version](https://img.shields.io/badge/go-1.25-blue.svg)](https://golang.org)
 [![Go Report Card](https://goreportcard.com/badge/github.com/simp-lee/isdict-api)](https://goreportcard.com/report/github.com/simp-lee/isdict-api)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 [![Test](https://github.com/simp-lee/isdict-api/workflows/Test/badge.svg)](https://github.com/simp-lee/isdict-api/actions)
 
-基于 PostgreSQL 的英汉词典 API，使用共享的 [isdict-commons](https://github.com/simp-lee/isdict-commons) 模型。
+isdict-api 是一个基于 Gin 和 PostgreSQL 的英汉词典服务，提供 `/api/v1` 下的 REST API，同时暴露存活与就绪检查，并内置一个适合本地使用的网页界面。
+
+完整接口字段和示例请查看 [api.zh-CN.md](api.zh-CN.md)。
 
 ## 核心特性
 
-易思词典（IsDict）整合六大权威词典数据源（Wiktionary、Oxford、CEFR-J、CET、ECDICT、WordFreq），提供：
+IsDict 整合了六类权威词典数据源（Wiktionary、Oxford、CEFR-J、CET、ECDICT、WordFreq），提供：
 
-- **完整的词典数据**：71.5万+词条、发音、释义、例句、词形变化
-- **多口音支持**：英美澳加新等10种口音的IPA音标，16万+发音数据
-- **双语支持**：97.6万英文义项 + 26万中文翻译，58.4万真实例句中英对照
-- **强大的搜索和查询功能**：前缀自动补全、短语智能匹配、88.8万词形变体反查
-- **多维等级标注**：CEFR A1-C2、CET 四六级、Oxford 3000/5000、柯林斯星级、词频 TOP 50K
-- **生产级中间件**：限流、CORS、缓存、请求 ID 追踪和超时控制，详见 [中间件功能](#中间件功能)
-- **开箱即用**：健康检查、优雅关闭、连接池和请求限制
-- **内置网页控制台**：轻量级 Alpine.js/Tailwind 单页应用，支持快速查询
+- **完整词典数据**：715,000+ 词条，覆盖发音、释义、例句和词形变化
+- **多口音支持**：10 种口音的 IPA 音标（英音、美音、澳音、加音、新西兰等），160,000+ 发音记录
+- **双语支持**：976,000 条英文义项 + 260,000 条中文释义，584,000 条真实双语例句
+- **强大的搜索与查询**：前缀自动补全、短语智能匹配、888,000 条词形变体反查
+- **多维等级标签**：CEFR A1-C2、CET-4/6、Oxford 3000/5000、Collins 星级、词频 TOP 50K
+- **生产可用的中间件**：限流、CORS、缓存、请求 ID 跟踪和超时控制；详见 [中间件说明](#中间件说明)
+- **开箱即用**：健康检查、优雅停机、连接池和请求限制
+- **内置 Web 控制台**：基于 Alpine.js/Tailwind 的轻量单页界面，适合快速查词
 
-完整 API 文档请查看 [api.zh-CN.md](api.zh-CN.md)。
+## 包含内容
+
+- 单词、变体、发音、释义、搜索、建议和短语查询接口
+- 依赖 PostgreSQL，并在启动与校验阶段检查 `pg_trgm`
+- 内置限流、CORS、超时、请求 ID、缓存、恢复和日志中间件
+- 本地由服务直接提供 `/` 页面以及 `/static/js` 下的打包 JavaScript
+- 提供 `cmd/migrate-db` 迁移工具
+
+## 运行要求
+
+- Go 1.25+
+- PostgreSQL 14+
+- Node.js 22+ 仅在运行前端回归测试或 `make test` 时需要
 
 ## 快速开始
-
-### 前置要求
-
-- Go 1.24+
-- PostgreSQL 14+
-- 词典数据（示例 SQL 或完整转储）
-
-### 本地运行
 
 ```bash
 git clone https://github.com/simp-lee/isdict-api.git
 cd isdict-api
 go mod download
 cp configs/api.example.env configs/api.env
-# 编辑 configs/api.env 填写你的数据库凭证
-go run cmd/api/main.go
+# 编辑 configs/api.env
+make db-setup
+make run
 ```
 
-- REST API: http://localhost:8080/api/v1
-- 网页界面: http://localhost:8080
-- 健康检查: http://localhost:8080/health
+默认情况下，`make run` 和 `make db-setup` 会通过 `ISDICT_API_ENV_FILE` 加载 `configs/api.env`。
 
-### Docker
+本地默认地址：
 
-```bash
-docker build -t isdict-api .
-docker run -d -p 8080:8080 --name isdict-api \
-  -e DB_HOST=your-db-host \
-  -e DB_USER=your-user \
-  -e DB_PASSWORD=your-password \
-  isdict-api
-```
-
-或使用 Docker Compose 创建包含 PostgreSQL 的完整本地环境：
-
-```bash
-docker-compose up -d
-```
+- API 基础路径: http://localhost:8080/api/v1
+- 网页界面: http://localhost:8080/
+- 存活检查: http://localhost:8080/health
+- 就绪检查: http://localhost:8080/api/v1/health
 
 ## 配置
 
-运行时设置从环境变量和 `.env` 文件（如果存在）加载。搜索顺序为：环境变量 → `configs/api.env` → `.env` → `api/.env` → `../.env`，找到第一个文件后即停止。
+程序总是优先读取进程环境变量。
+
+- 如果设置了 `ISDICT_API_ENV_FILE`，只加载该文件
+- 否则依次尝试 `.env`、`api/.env`、`../.env`
+- `DB_*` 同时支持 `PG*` 别名，例如 `PGHOST`、`PGPORT`、`PGUSER`、`PGPASSWORD`、`PGDATABASE`、`PGSSLMODE`
+
+常用配置如下：
 
 | 变量 | 默认值 | 说明 |
 |------|--------|------|
-| `DB_HOST` | localhost | PostgreSQL 主机 |
-| `DB_PORT` | 5432 | PostgreSQL 端口 |
-| `DB_USER` | postgres | 数据库用户 |
-| `DB_PASSWORD` | postgres | 数据库密码 |
-| `DB_NAME` | isdict | 数据库名称 |
-| `DB_SSLMODE` | prefer | PostgreSQL SSL 模式 |
-| `PORT` | 8080 | HTTP 监听端口 |
-| `GIN_MODE` | debug | `debug`、`release` 或 `test` |
-| `DB_MAX_IDLE_CONNS` | 10 | 连接池空闲连接上限 |
-| `DB_MAX_OPEN_CONNS` | 100 | 连接池最大打开连接数 |
-| `API_BATCH_MAX_SIZE` | 100 | 批量请求最大单词数 |
-| `API_SEARCH_MAX_LIMIT` | 100 | 搜索结果上限 |
-| `API_SUGGEST_MAX_LIMIT` | 50 | 建议结果上限 |
+| `DB_HOST` | `localhost` | PostgreSQL 主机 |
+| `DB_PORT` | `5432` | PostgreSQL 端口 |
+| `DB_USER` | `postgres` | PostgreSQL 用户 |
+| `DB_PASSWORD` | `postgres` | PostgreSQL 密码 |
+| `DB_NAME` | `isdict` | 数据库名 |
+| `DB_SSLMODE` | `prefer` | 托管 PostgreSQL 通常应设为 `require` 或更严格 |
+| `PORT` | `8080` | HTTP 监听端口 |
+| `GIN_MODE` | `debug` | `debug`、`release`、`test` |
+| `DB_MAX_IDLE_CONNS` | `10` | 连接池空闲连接上限 |
+| `DB_MAX_OPEN_CONNS` | `100` | 连接池最大打开连接数 |
+| `API_BATCH_MAX_SIZE` | `100` | `POST /api/v1/words/batch` 最大词数 |
+| `API_SEARCH_MAX_LIMIT` | `100` | `/search` 的最大 `limit` |
+| `API_SUGGEST_MAX_LIMIT` | `50` | `/suggest` 的最大 `limit` |
+| `ENABLE_RATE_LIMIT` | `true` | 是否启用限流 |
+| `ENABLE_CORS` | `true` | 是否启用 CORS |
+| `ENABLE_TIMEOUT` | `true` | 是否启用超时中间件 |
+| `TIMEOUT_SECONDS` | `30` | 请求超时时间 |
+| `ENABLE_REQUEST_ID` | `true` | 是否注入 `X-Request-Id` |
+| `ENABLE_CACHE` | `true` | 是否为 `/api/*` 的 GET 请求启用缓存 |
+| `ISDICT_API_ENV_FILE` | 空 | 显式配置文件路径 |
 
-### 中间件配置
+就绪检查不仅验证数据库连通性，还会检查必需扩展是否可用。只有数据库可连接且 `pg_trgm` 存在时，`/api/v1/health` 才会返回 `200`。
 
-| 变量 | 默认值 | 说明 |
-|------|--------|------|
-| `ENABLE_RATE_LIMIT` | true | 启用限流 |
-| `RATE_LIMIT_RPS` | 100 | 每秒请求数限制 |
-| `RATE_LIMIT_BURST` | 200 | 令牌桶突发容量 |
-| `RATE_LIMIT_PER_HOUR` | 10000 | 每小时请求数限制 |
-| `RATE_LIMIT_PER_DAY` | 0 | 每天请求数限制（0=禁用）|
-| `ENABLE_CORS` | true | 启用 CORS 头 |
-| `CORS_ALLOW_ORIGINS` | * | 允许的源（逗号分隔）|
-| `ENABLE_TIMEOUT` | true | 启用请求超时 |
-| `TIMEOUT_SECONDS` | 30 | 请求超时时长（秒）|
-| `ENABLE_REQUEST_ID` | true | 启用请求 ID 生成 |
-| `ENABLE_CACHE` | true | 启用响应缓存 |
-| `CACHE_MAX_SIZE` | 1000 | 缓存最大条目数 |
-| `CACHE_EXPIRATION_MINS` | 5 | 缓存条目过期时间（分钟）|
+## 数据库工作流
 
-**说明：**
-- `/health` 和静态文件不受限流限制
-- 响应缓存仅应用于 `/api/*` 路径的 GET 请求
-- 所有响应通过 `X-Request-Id` 头包含请求 ID
-- 限流响应头：`X-Ratelimit-Limit`、`X-Ratelimit-Limit-Hour`、`X-Ratelimit-Remaining`
-
-## 数据库
-
-数据库架构和索引通过 `isdict-commons/migration` 中的数据库迁移管理。使用 `cmd/migrate-db` 工具进行所有数据库操作。
-
-### 生产环境工作流
+主流程是使用 `cmd/migrate-db` 迁移工具。
 
 ```bash
-# 全新迁移（删除并重建所有表）
-go run cmd/migrate-db/main.go --drop
+# 执行迁移
+ISDICT_API_ENV_FILE=configs/api.env go run ./cmd/migrate-db
 
-# 增量迁移（创建缺失的表/索引）
-go run cmd/migrate-db/main.go
+# 校验迁移管理对象
+ISDICT_API_ENV_FILE=configs/api.env go run ./cmd/migrate-db --verify
 
-# 验证迁移状态
-go run cmd/migrate-db/main.go --verify
+# 删除并重建表，需要显式确认目标
+ISDICT_API_ENV_FILE=configs/api.env \
+go run ./cmd/migrate-db --drop --force --confirm-drop postgres@db.example.com:5432/isdict
 ```
 
-### 使用示例数据快速测试
+辅助命令：
 
-对于快速本地测试，可以使用 `db/` 目录中的 SQL 辅助文件：
+- `make db-setup`：执行迁移工具
+- `make db-verify`：通过迁移工具校验受迁移管理的数据库对象
+- `make db-reset`：带确认的重置流程；要求 `CONFIRM_DROP` 与目标库完全匹配
+- `make db-fixtures`：只向已迁移且为空的数据库导入 `db/sample_data.sql`；要求 `CONFIRM_FIXTURES`
+- `make db-sql-setup`：为测试或夹具工作应用 `db/` 下的参考 SQL；要求环境中已可用 `pg_trgm`
+
+这四个数据库辅助命令现在使用统一的连接参数解析顺序：先读已导出的 `DB_*`，再读已导出的 `PG*`，最后回退到 `ISDICT_API_ENV_FILE` 指向的配置文件（Makefile 默认值为 `configs/api.env`）。
+
+## HTTP 接口概览
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| `GET` | `/health` | 存活检查 |
+| `GET` | `/api/v1/health` | 就绪检查 |
+| `GET` | `/api/v1/words/:headword` | 完整词条 |
+| `GET` | `/api/v1/words/:headword/pronunciations` | 仅发音 |
+| `GET` | `/api/v1/words/:headword/senses` | 仅释义 |
+| `GET` | `/api/v1/words/by-variant/:variant` | 通过变体反查词条 |
+| `POST` | `/api/v1/words/batch` | 批量查词 |
+| `GET` | `/api/v1/search` | 带过滤条件的搜索 |
+| `GET` | `/api/v1/suggest` | 自动补全 |
+| `GET` | `/api/v1/phrases` | 短语检索 |
+
+当前实现中需要注意的请求规则：
+
+- `cefr_level` 仅接受 `A1`、`A2`、`B1`、`B2`、`C1`、`C2`
+- `/search` 必须提供 `q`，默认 `limit=20`
+- `/suggest` 必须提供 `prefix`，默认 `limit=10`
+- `/phrases` 必须提供 `q`，且 `limit` 最大为 `50`
+- `/health` 和 `/api/v1/health` 返回纯 JSON，不使用标准响应封装
+
+## 中间件说明
+
+- `/health` 和 `/api/v1/health` 会跳过限流和响应缓存
+- 普通 API 路由走超时中间件；就绪检查使用独立的数据库探测超时
+- 本地静态资源由 API 进程直接提供在 `/`，并仅暴露 `/static/js` 下的打包 JavaScript
+
+## 测试
 
 ```bash
-createdb isdict
-psql -d isdict -f db/schema.sql
-psql -d isdict -f db/indexes.sql
-psql -d isdict -f db/sample_data.sql
+# 默认完整测试流程
+make test
+
+# 仅运行 Go 测试
+go test -v -race ./...
+
+# 仅运行前端回归测试
+node --test web/dictionary_app.test.mjs
+
+# 中间件包测试
+go test ./internal/api/middleware -count=1
+
+# 中间件探针客户端
+go run ./tests/middleware/basic
+go run ./tests/middleware/verify
+go run ./tests/middleware/stress
 ```
 
-**注意：** `db/` 中的 SQL 文件仅供参考和测试使用。它们可能落后于 `isdict-commons/migration` 中的权威迁移。
-
-## 中间件功能
-
-API 包含由 [ginx](https://github.com/simp-lee/ginx) 提供支持的生产级中间件：
-
-- **限流**：令牌桶算法，可配置 RPS、突发和每小时/每天限制
-- **CORS**：可配置源和方法的跨域资源共享
-- **响应缓存**：自动 GET 请求缓存，可配置大小和 TTL
-- **请求 ID**：用于调试和日志记录的唯一请求追踪
-- **超时保护**：可配置的请求超时以防止资源耗尽
-- **恐慌恢复**：从 panic 中自动恢复，返回结构化错误响应
-- **结构化日志**：带时序和状态码的请求/响应日志记录
-
-运行验证测试：
-```bash
-# 首先启动 API 服务器
-go run cmd/api/main.go
-
-# 在另一个终端运行中间件测试
-go run tests/middleware/verify/main.go
-
-# 或运行压力测试
-go run tests/middleware/stress/main.go
-```
-
-## 网页控制台
-
-- 从 `web/index.html` 提供的单页应用
-- 带 CEFR/Oxford/CET 徽章和词频排名的即时建议
-- 在专用标签页中显示变体、双语释义、发音和标记示例
-- 开箱即用于 `http://localhost:8080`
-- 如果指向远程 API 端点，请在 `index.html` 中配置 `apiBaseURL`
+这些中间件探针客户端默认访问 `http://localhost:8080`，如有需要可通过环境变量覆盖。
 
 ## 项目结构
 
-```
-cmd/
-  api/          # API 入口点
-  migrate-db/   # 数据库迁移工具
-configs/        # 环境变量模板
-db/             # SQL 参考（架构、索引、示例数据）
-internal/       # 处理器、服务、仓库、配置
-  api/          # API 层（handler、service、repository、middleware）
-  config/       # 配置加载器
-tests/          # 测试套件
-  middleware/   # 中间件测试（basic、verify、stress）
-web/            # 静态网页控制台（Alpine.js + Tailwind）
+```text
+cmd/            应用入口
+configs/        环境变量模板
+db/             参考 SQL 与示例数据
+internal/       handler、service、repository、middleware、config
+tests/          中间件探针程序与测试
+web/            内置静态页面
 ```
 
 ## 许可证
 
-MIT 许可证。详见 `LICENSE` 文件。
-
-为英语学习者和教育工作者打造。
+MIT。详见 [LICENSE](LICENSE)。

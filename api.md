@@ -7,7 +7,7 @@ Comprehensive reference for the `isdict-api` service.
 ## Base URL & Versioning
 
 - Default base URL during local development: `http://localhost:8080`
-- All endpoints are rooted under `/api/v1`
+- Dictionary and business endpoints are rooted under `/api/v1`; operational endpoints such as `/health` are exposed outside that prefix
 - The service is currently unauthenticated; apply your own gateway or proxy when running in production
 
 ## Response Envelope
@@ -32,7 +32,9 @@ Every API endpoint returns a unified response structure defined in `isdict-commo
   - `details` (any): Optional additional error context
 - `meta` (object|null): Optional metadata for pagination and statistics
 
-**Special case:** `/health` returns plain JSON without the envelope for simplicity.
+The envelope remains part of the public contract for dictionary endpoints. Response payloads are not flattened for backward compatibility: word objects still use `headword` and `senses`, and pronunciation data remains a `pronunciations[]` array structure.
+
+**Special case:** `/health` and `/api/v1/health` return plain JSON without the envelope for simplicity.
 
 ## Words
 
@@ -93,13 +95,13 @@ The response `meta` section reports `requested`, `found`, and `not_found` lists.
 
 ### GET /api/v1/search
 
-Fuzzy search with ranking and filters. Requires `q` parameter with minimum 3 characters.
+Fuzzy search with ranking and filters. Requires `q` whose normalized form is at least 3 Unicode characters long.
 
 | Query | Type | Default | Notes |
 |-------|------|---------|-------|
-| `q` | string | — | Search keyword (min 3 characters, required) |
+| `q` | string | — | Search keyword (required; normalized minimum 3 Unicode characters after trimming, lowercasing, and removing spaces, hyphens, and underscores) |
 | `pos` | string | — | Lowercase POS filter (see [Part of Speech](#part-of-speech)) |
-| `cefr_level` | int | — | 0-6 (0 or omit = no filter) |
+| `cefr_level` | string | — | `A1`, `A2`, `B1`, `B2`, `C1`, or `C2` (case-insensitive) |
 | `oxford_level` | int | — | 0 (any), 1 (Oxford 3000), 2 (Oxford 5000) |
 | `cet_level` | int | — | 0 (any), 4 (CET-4), 6 (CET-6) |
 | `max_frequency_rank` | int | — | Keep words with rank ≤ this value |
@@ -111,10 +113,15 @@ Fuzzy search with ranking and filters. Requires `q` parameter with minimum 3 cha
 
 Autocomplete suggestions for search boxes. Uses the same filter semantics as `/search`.
 
-**Parameters:**
-- `prefix` (required): Search prefix, minimum 3 characters
-- `limit`: Default 10, capped at `API_SUGGEST_MAX_LIMIT` (default: 50)
-- Supports all filter parameters from `/search`: `cefr_level`, `oxford_level`, `cet_level`, `max_frequency_rank`, `min_collins_stars`
+| Query | Type | Default | Notes |
+|-------|------|---------|-------|
+| `prefix` | string | — | Search prefix (required; normalized minimum 3 Unicode characters after trimming, lowercasing, and removing spaces, hyphens, and underscores) |
+| `cefr_level` | string | — | `A1`, `A2`, `B1`, `B2`, `C1`, or `C2` (case-insensitive) |
+| `oxford_level` | int | — | 0 (any), 1 (Oxford 3000), 2 (Oxford 5000) |
+| `cet_level` | int | — | 0 (any), 4 (CET-4), 6 (CET-6) |
+| `max_frequency_rank` | int | — | Keep words with rank ≤ this value |
+| `min_collins_stars` | int | — | 0-5 (minimum Collins rating) |
+| `limit` | int | 10 | Max results (capped at `API_SUGGEST_MAX_LIMIT`) |
 
 ### GET /api/v1/phrases
 
@@ -133,7 +140,7 @@ curl "http://localhost:8080/api/v1/phrases?q=run&limit=20"
 
 ### GET /health
 
-Returns HTTP 200 with JSON health status. Intended for container orchestrator health checks and monitoring.
+Returns HTTP 200 with JSON health status. Intended for load balancers, uptime probes, and other lightweight operational monitoring.
 
 **Response:**
 ```json
@@ -144,6 +151,30 @@ Returns HTTP 200 with JSON health status. Intended for container orchestrator he
 ```
 
 **Note:** This endpoint does not use the standard response envelope for simplicity.
+
+### GET /api/v1/health
+
+Readiness endpoint. Verifies that the API can reach PostgreSQL by performing a database ping with the request context, and confirms that the required `pg_trgm` extension is already enabled.
+
+**Success response (`200 OK`):**
+```json
+{
+  "status": "ok",
+  "service": "isdict-api"
+}
+```
+
+**Failure response (`503 Service Unavailable`):**
+```json
+{
+  "status": "not_ready",
+  "service": "isdict-api"
+}
+```
+
+`503` is returned when PostgreSQL is unreachable or when `pg_trgm` is missing.
+
+**Note:** This endpoint also returns plain JSON and does not use the standard response envelope.
 
 ## Enumerations
 
@@ -171,11 +202,19 @@ All POS parameters are case-insensitive.
 | `MISSING_PARAMETER` | 400 | Required path or query parameter missing |
 | `INVALID_PARAMETER` | 400 | Validation failed for the supplied value |
 | `BATCH_LIMIT_EXCEEDED` | 400 | Batch payload exceeds configured maximum |
-| `INTERNAL_ERROR` | 500 | Unhandled server-side error |
+| `INTERNAL_ERROR` | 500 | Unhandled server-side error; public message is always `An internal error occurred` |
+
+Server-side internal error details are logged with request metadata and are not exposed in the API response body.
+
+## Data Migration Authority
+
+Data migration behavior is defined by `isdict-commons/migration` and should be treated as the authoritative implementation.
+
+SQL files under `db/*.sql` in this repository are provided only as reference fixtures and for compatibility checks against disposable PostgreSQL databases; they are not the canonical migration source for production or compatibility guarantees.
 
 ## Usage Notes
 
-- `/search` and `/suggest` enforce a minimum query length of 3 Unicode characters; `/phrases` accepts 1-50 characters
+- `/search` and `/suggest` enforce a minimum normalized query length of 3 Unicode characters after trimming, lowercasing, and removing spaces, hyphens, and underscores; `/phrases` accepts 1-50 trimmed characters
 - Whitespace is automatically trimmed from all string parameters
 - Enum parameters (accent, POS) are case-insensitive and normalized to lowercase
 - Recommended: implement client-side caching for frequently accessed words and suggestions

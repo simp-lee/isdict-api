@@ -7,10 +7,10 @@
 --   → isdict-commons/migration/migration.go
 --
 -- For production deployment, use the Go migration tool (recommended):
---   go run cmd/migrate-db/main.go --drop
+--   go run cmd/migrate-db/main.go --drop --force --confirm-drop postgres@db.example.com:5432/isdict
 --
 -- This SQL file may become outdated. Always verify against the Go code.
--- Last synchronized: 2025-11-04
+-- Last synchronized: 2026-03-08
 -- ==============================================================================
 --
 -- This schema defines the complete database structure for the isdict project.
@@ -18,14 +18,14 @@
 --
 -- Prerequisites:
 -- 1. PostgreSQL 14 or higher
--- 2. Create database: createdb isdict
+-- 2. Provision an empty disposable database on your PostgreSQL instance
 --
 -- Legacy Usage (for backward compatibility):
--- psql -d isdict -f db/schema.sql
+-- psql --host "$PGHOST" --port "$PGPORT" --username "$PGUSER" --dbname "$PGDATABASE" -f db/schema.sql
 -- ==============================================================================
 
--- Enable required extensions
-CREATE EXTENSION IF NOT EXISTS pg_trgm;  -- For trigram similarity and fuzzy search
+-- Enable required performance extension.
+CREATE EXTENSION IF NOT EXISTS pg_trgm;
 
 -- ==============================================================================
 -- Table: words (Main word entries)
@@ -122,12 +122,15 @@ CREATE TABLE IF NOT EXISTS word_variants (
     frequency_rank      INTEGER NOT NULL DEFAULT 0 CHECK (frequency_rank >= 0),
     created_at          TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at          TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    UNIQUE (word_id, variant_text, kind, COALESCE(form_type, 0))
+    CONSTRAINT word_variants_kind_form_type_check CHECK (
+        (kind = 1 AND form_type IS NOT NULL) OR
+        (kind = 2 AND form_type IS NULL)
+    )
 );
 
 COMMENT ON TABLE word_variants IS 'Word variants (forms, aliases, spelling variations)';
 COMMENT ON COLUMN word_variants.kind IS 'Variant kind: 1=Form, 2=Alias';
-COMMENT ON COLUMN word_variants.form_type IS 'Form type: 1=Plural, 2=Past, 3=PastPart, 4=Gerund, etc.';
+COMMENT ON COLUMN word_variants.form_type IS 'Form type: 1=past, 2=past_participle, 3=present_3rd, 4=gerund, 5=plural, etc.';
 COMMENT ON COLUMN word_variants.tags IS 'Additional tags (e.g., regional, archaic)';
 
 -- ==============================================================================
@@ -135,5 +138,5 @@ COMMENT ON COLUMN word_variants.tags IS 'Additional tags (e.g., regional, archai
 -- ==============================================================================
 -- Next steps:
 -- 1. Run db/indexes.sql to create performance indexes
--- 2. Run db/sample_data.sql to load sample data (or full data dump)
+-- 2. Run db/sample_data.sql only against an empty disposable database (or import a full data dump)
 -- ==============================================================================

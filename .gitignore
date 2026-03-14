@@ -5,8 +5,12 @@ bin/
 # Go test and coverage
 *.test
 *.out
+coverage.html
+.go-test-lock/
 
 # Environment files
+.env
+api/.env
 configs/api.env
 
 # IDE files
@@ -19,3 +23,5 @@ configs/api.env
 # OS files
 .DS_Store
 Thumbs.db
+
+.agents-work/

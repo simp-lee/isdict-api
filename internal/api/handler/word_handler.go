@@ -1,27 +1,44 @@
 package handler
 
 import (
+	"context"
 	"errors"
+	"log/slog"
 	"net/http"
 	"strconv"
 	"strings"
-	"unicode/utf8"
+
+	"github.com/simp-lee/isdict-api/internal/api/contracts"
+	"github.com/simp-lee/isdict-api/internal/api/queryvalidation"
 
 	"github.com/gin-gonic/gin"
-	"github.com/simp-lee/isdict-api/internal/api/repository"
-	"github.com/simp-lee/isdict-api/internal/api/service"
+	"github.com/simp-lee/ginx"
 	"github.com/simp-lee/isdict-api/internal/config"
 	"github.com/simp-lee/isdict-commons/model"
 )
 
+// WordServiceInterface defines the minimal service contract the handler needs.
+// Implementations should return contracts.ErrWordNotFound or contracts.ErrVariantNotFound
+// when the requested resource does not exist.
+type WordServiceInterface interface {
+	GetWordByHeadword(ctx context.Context, headword string, accentCode *int, includeVariants, includePronunciations, includeSenses bool) (*model.WordResponse, error)
+	GetWordsByVariant(ctx context.Context, variant string, kindStr *string, includePronunciations, includeSenses bool) ([]model.VariantReverseResponse, error)
+	GetWordsBatch(ctx context.Context, req *model.BatchRequest) ([]model.WordResponse, *model.MetaInfo, error)
+	SearchWords(ctx context.Context, keyword string, posCode *int, cefrLevel *int, oxfordLevel *int, cetLevel *int, maxFrequencyRank *int, minCollinsStars *int, limit, offset int) ([]model.SearchResultResponse, *model.MetaInfo, error)
+	SuggestWords(ctx context.Context, prefix string, cefrLevel *int, oxfordLevel *int, cetLevel *int, maxFrequencyRank *int, minCollinsStars *int, limit int) ([]model.SuggestResponse, error)
+	SearchPhrases(ctx context.Context, keyword string, limit int) ([]model.SuggestResponse, error)
+	GetPronunciations(ctx context.Context, headword string, accentCode *int) ([]model.PronunciationResponse, error)
+	GetSenses(ctx context.Context, headword string, posCode *int, lang string) ([]model.SenseResponse, error)
+}
+
 // WordHandler handles HTTP requests for word operations
 type WordHandler struct {
-	service *service.WordService
+	service WordServiceInterface
 	config  *config.Config
 }
 
 // NewWordHandler creates a new word handler instance
-func NewWordHandler(service *service.WordService, cfg *config.Config) *WordHandler {
+func NewWordHandler(service WordServiceInterface, cfg *config.Config) *WordHandler {
 	return &WordHandler{
 		service: service,
 		config:  cfg,
@@ -31,20 +48,62 @@ func NewWordHandler(service *service.WordService, cfg *config.Config) *WordHandl
 // Helper functions for parameter parsing and validation
 
 // MinQueryLength is the minimum length for search queries (in characters, not bytes)
-const MinQueryLength = 3
+const MinQueryLength = queryvalidation.MinQueryLength
 
-// validateQueryLength validates that the query meets the minimum length requirement
-func validateQueryLength(query string) error {
-	length := utf8.RuneCountInString(strings.TrimSpace(query))
-	if length < MinQueryLength {
-		return errors.New("查询长度至少需要 3 个字符")
+const SearchQueryMaxLength = 100
+
+const SuggestPrefixMaxLength = 50
+
+const internalErrorMessage = "An internal error occurred"
+
+const invalidRequestBodyMessage = "Invalid request body"
+
+func writeInternalError(c *gin.Context, handlerName string, err error) {
+	requestID, _ := ginx.GetRequestID(c)
+	slog.Default().Error("handler request failed",
+		"handler", handlerName,
+		"request_id", requestID,
+		"error", err,
+	)
+
+	c.JSON(http.StatusInternalServerError, model.NewErrorResponse(
+		"INTERNAL_ERROR",
+		internalErrorMessage,
+		nil,
+	))
+}
+
+func trimmedQuery(c *gin.Context, paramName string) string {
+	return strings.TrimSpace(c.Query(paramName))
+}
+
+func trimmedPathParam(c *gin.Context, paramName string) string {
+	return strings.TrimSpace(c.Param(paramName))
+}
+
+func validateQueryLength(query, fieldName string, maxLength int) (string, map[string]interface{}) {
+	normalizedLength := queryvalidation.NormalizedRuneCount(query)
+	if normalizedLength < MinQueryLength {
+		return fieldName + " must be at least " + strconv.Itoa(MinQueryLength) + " characters", map[string]interface{}{
+			"min_length": MinQueryLength,
+			"provided":   normalizedLength,
+		}
 	}
-	return nil
+
+	length := queryvalidation.TrimmedRuneCount(query)
+	if maxLength > 0 && length > maxLength {
+		return fieldName + " must not exceed " + strconv.Itoa(maxLength) + " characters", map[string]interface{}{
+			"max_length": maxLength,
+			"provided":   length,
+		}
+	}
+
+	return "", nil
 }
 
 // parseAccent parses and validates the accent query parameter
 func parseAccent(c *gin.Context, paramName string) (*int, bool) {
-	accentParam := c.Query(paramName)
+	accentParam := trimmedQuery(c, paramName)
 	if accentParam == "" {
 		return nil, true
 	}
@@ -62,7 +121,7 @@ func parseAccent(c *gin.Context, paramName string) (*int, bool) {
 
 // parsePOS parses and validates the POS query parameter
 func parsePOS(c *gin.Context, paramName string) (*int, bool) {
-	posParam := c.Query(paramName)
+	posParam := trimmedQuery(c, paramName)
 	if posParam == "" {
 		return nil, true
 	}
@@ -80,25 +139,25 @@ func parsePOS(c *gin.Context, paramName string) (*int, bool) {
 
 // parseCEFRLevel parses and validates the CEFR level query parameter
 func parseCEFRLevel(c *gin.Context, paramName string) (*int, bool) {
-	cefrParam := c.Query(paramName)
+	cefrParam := trimmedQuery(c, paramName)
 	if cefrParam == "" {
 		return nil, true
 	}
-	level, err := strconv.Atoi(cefrParam)
-	if err != nil || level < 0 || level > 6 {
-		c.JSON(http.StatusBadRequest, model.NewErrorResponse(
-			"INVALID_PARAMETER",
-			"cefr_level must be between 0 and 6",
-			nil,
-		))
-		return nil, false
+	normalized := strings.ToUpper(cefrParam)
+	if level, ok := model.ParseCEFRLevel(normalized); ok {
+		return &level, true
 	}
-	return &level, true
+	c.JSON(http.StatusBadRequest, model.NewErrorResponse(
+		"INVALID_PARAMETER",
+		"cefr_level must be one of: A1, A2, B1, B2, C1, C2",
+		nil,
+	))
+	return nil, false
 }
 
 // parseOxfordLevel parses and validates the Oxford level query parameter
 func parseOxfordLevel(c *gin.Context, paramName string) (*int, bool) {
-	oxfordParam := c.Query(paramName)
+	oxfordParam := trimmedQuery(c, paramName)
 	if oxfordParam == "" {
 		return nil, true
 	}
@@ -111,12 +170,15 @@ func parseOxfordLevel(c *gin.Context, paramName string) (*int, bool) {
 		))
 		return nil, false
 	}
+	if level == 0 {
+		return nil, true
+	}
 	return &level, true
 }
 
 // parseCETLevel parses and validates the CET level query parameter
 func parseCETLevel(c *gin.Context, paramName string) (*int, bool) {
-	cetParam := c.Query(paramName)
+	cetParam := trimmedQuery(c, paramName)
 	if cetParam == "" {
 		return nil, true
 	}
@@ -144,7 +206,7 @@ func parseCETLevel(c *gin.Context, paramName string) (*int, bool) {
 
 // parseMaxFrequencyRank parses and validates the max frequency rank query parameter
 func parseMaxFrequencyRank(c *gin.Context, paramName string) (*int, bool) {
-	rankParam := c.Query(paramName)
+	rankParam := trimmedQuery(c, paramName)
 	if rankParam == "" {
 		return nil, true
 	}
@@ -162,7 +224,7 @@ func parseMaxFrequencyRank(c *gin.Context, paramName string) (*int, bool) {
 
 // parseMinCollinsStars parses and validates the minimum Collins stars query parameter
 func parseMinCollinsStars(c *gin.Context, paramName string) (*int, bool) {
-	starsParam := c.Query(paramName)
+	starsParam := trimmedQuery(c, paramName)
 	if starsParam == "" {
 		return nil, true
 	}
@@ -180,7 +242,7 @@ func parseMinCollinsStars(c *gin.Context, paramName string) (*int, bool) {
 
 // parseLimit parses and validates the limit query parameter
 func parseLimit(c *gin.Context, defaultLimit, maxLimit int) (int, bool) {
-	limitParam := c.Query("limit")
+	limitParam := trimmedQuery(c, "limit")
 	if limitParam == "" {
 		return defaultLimit, true
 	}
@@ -198,7 +260,7 @@ func parseLimit(c *gin.Context, defaultLimit, maxLimit int) (int, bool) {
 
 // parseOffset parses and validates the offset query parameter
 func parseOffset(c *gin.Context) (int, bool) {
-	offsetParam := c.Query("offset")
+	offsetParam := trimmedQuery(c, "offset")
 	if offsetParam == "" {
 		return 0, true
 	}
@@ -216,7 +278,7 @@ func parseOffset(c *gin.Context) (int, bool) {
 
 // parseBool parses and validates a boolean query parameter
 func parseBool(c *gin.Context, paramName string, defaultValue bool) (bool, bool) {
-	param := c.Query(paramName)
+	param := trimmedQuery(c, paramName)
 	if param == "" {
 		return defaultValue, true
 	}
@@ -237,8 +299,8 @@ func parseBool(c *gin.Context, paramName string, defaultValue bool) (bool, bool)
 
 // validateHeadword validates the headword path parameter
 func validateHeadword(c *gin.Context) (string, bool) {
-	headword := c.Param("headword")
-	if strings.TrimSpace(headword) == "" {
+	headword := trimmedPathParam(c, "headword")
+	if headword == "" {
 		c.JSON(http.StatusBadRequest, model.NewErrorResponse(
 			"MISSING_PARAMETER",
 			"Headword parameter is required",
@@ -276,9 +338,9 @@ func (h *WordHandler) GetWord(c *gin.Context) {
 		return
 	}
 
-	word, err := h.service.GetWordByHeadword(headword, accentCode, includeVariants, includePronunciations, includeSenses)
+	word, err := h.service.GetWordByHeadword(c.Request.Context(), headword, accentCode, includeVariants, includePronunciations, includeSenses)
 	if err != nil {
-		if errors.Is(err, repository.ErrWordNotFound) {
+		if errors.Is(err, contracts.ErrWordNotFound) {
 			c.JSON(http.StatusNotFound, model.NewErrorResponse(
 				"WORD_NOT_FOUND",
 				"Word '"+headword+"' not found in dictionary",
@@ -286,11 +348,7 @@ func (h *WordHandler) GetWord(c *gin.Context) {
 			))
 			return
 		}
-		c.JSON(http.StatusInternalServerError, model.NewErrorResponse(
-			"INTERNAL_ERROR",
-			err.Error(),
-			nil,
-		))
+		writeInternalError(c, "GetWord", err)
 		return
 	}
 
@@ -299,8 +357,8 @@ func (h *WordHandler) GetWord(c *gin.Context) {
 
 // GetWordByVariant handles GET /api/v1/words/by-variant/:variant
 func (h *WordHandler) GetWordByVariant(c *gin.Context) {
-	variant := c.Param("variant")
-	if strings.TrimSpace(variant) == "" {
+	variant := trimmedPathParam(c, "variant")
+	if variant == "" {
 		c.JSON(http.StatusBadRequest, model.NewErrorResponse(
 			"MISSING_PARAMETER",
 			"Variant parameter is required",
@@ -310,7 +368,7 @@ func (h *WordHandler) GetWordByVariant(c *gin.Context) {
 	}
 
 	var kind *string
-	if kindParam := strings.TrimSpace(c.Query("kind")); kindParam != "" {
+	if kindParam := trimmedQuery(c, "kind"); kindParam != "" {
 		kindLower := strings.ToLower(kindParam)
 		if kindLower != "form" && kindLower != "alias" {
 			c.JSON(http.StatusBadRequest, model.NewErrorResponse(
@@ -333,9 +391,9 @@ func (h *WordHandler) GetWordByVariant(c *gin.Context) {
 		return
 	}
 
-	words, err := h.service.GetWordsByVariant(variant, kind, includePronunciations, includeSenses)
+	words, err := h.service.GetWordsByVariant(c.Request.Context(), variant, kind, includePronunciations, includeSenses)
 	if err != nil {
-		if errors.Is(err, repository.ErrVariantNotFound) {
+		if errors.Is(err, contracts.ErrVariantNotFound) {
 			c.JSON(http.StatusNotFound, model.NewErrorResponse(
 				"WORD_NOT_FOUND",
 				"Variant '"+variant+"' not found in dictionary",
@@ -343,11 +401,7 @@ func (h *WordHandler) GetWordByVariant(c *gin.Context) {
 			))
 			return
 		}
-		c.JSON(http.StatusInternalServerError, model.NewErrorResponse(
-			"INTERNAL_ERROR",
-			err.Error(),
-			nil,
-		))
+		writeInternalError(c, "GetWordByVariant", err)
 		return
 	}
 
@@ -360,7 +414,7 @@ func (h *WordHandler) GetWordsBatch(c *gin.Context) {
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, model.NewErrorResponse(
 			"INVALID_PARAMETER",
-			"Invalid request body: "+err.Error(),
+			invalidRequestBodyMessage,
 			nil,
 		))
 		return
@@ -375,29 +429,7 @@ func (h *WordHandler) GetWordsBatch(c *gin.Context) {
 		return
 	}
 
-	// Check batch size limit early to avoid wasting resources on oversized requests
-	if len(req.Words) > h.config.APIBatchMaxSize {
-		c.JSON(http.StatusBadRequest, model.NewErrorResponse(
-			"BATCH_LIMIT_EXCEEDED",
-			"Batch size exceeds the maximum limit of "+strconv.Itoa(h.config.APIBatchMaxSize)+" words",
-			nil,
-		))
-		return
-	}
-
-	cleanedWords := make([]string, 0, len(req.Words))
-	seen := make(map[string]struct{}, len(req.Words))
-	for _, w := range req.Words {
-		trimmed := strings.TrimSpace(w)
-		if trimmed == "" {
-			continue
-		}
-		if _, exists := seen[trimmed]; exists {
-			continue
-		}
-		seen[trimmed] = struct{}{}
-		cleanedWords = append(cleanedWords, trimmed)
-	}
+	cleanedWords := queryvalidation.NormalizeBatchWords(req.Words)
 
 	if len(cleanedWords) == 0 {
 		c.JSON(http.StatusBadRequest, model.NewErrorResponse(
@@ -408,23 +440,20 @@ func (h *WordHandler) GetWordsBatch(c *gin.Context) {
 		return
 	}
 
-	req.Words = cleanedWords
-
-	words, meta, err := h.service.GetWordsBatch(&req)
-	if err != nil {
-		if errors.Is(err, service.ErrBatchLimitExceeded) {
-			c.JSON(http.StatusBadRequest, model.NewErrorResponse(
-				"BATCH_LIMIT_EXCEEDED",
-				err.Error(),
-				nil,
-			))
-			return
-		}
-		c.JSON(http.StatusInternalServerError, model.NewErrorResponse(
-			"INTERNAL_ERROR",
-			err.Error(),
+	if len(cleanedWords) > h.config.APIBatchMaxSize {
+		c.JSON(http.StatusBadRequest, model.NewErrorResponse(
+			"BATCH_LIMIT_EXCEEDED",
+			"Batch size exceeds the maximum limit of "+strconv.Itoa(h.config.APIBatchMaxSize)+" words",
 			nil,
 		))
+		return
+	}
+
+	req.Words = cleanedWords
+
+	words, meta, err := h.service.GetWordsBatch(c.Request.Context(), &req)
+	if err != nil {
+		writeInternalError(c, "GetWordsBatch", err)
 		return
 	}
 
@@ -433,8 +462,8 @@ func (h *WordHandler) GetWordsBatch(c *gin.Context) {
 
 // SearchWords handles GET /api/v1/search
 func (h *WordHandler) SearchWords(c *gin.Context) {
-	keyword := c.Query("q")
-	if strings.TrimSpace(keyword) == "" {
+	keyword := trimmedQuery(c, "q")
+	if keyword == "" {
 		c.JSON(http.StatusBadRequest, model.NewErrorResponse(
 			"MISSING_PARAMETER",
 			"Query parameter 'q' is required",
@@ -443,15 +472,11 @@ func (h *WordHandler) SearchWords(c *gin.Context) {
 		return
 	}
 
-	// Validate minimum query length
-	if err := validateQueryLength(keyword); err != nil {
+	if message, details := validateQueryLength(keyword, "Query", SearchQueryMaxLength); message != "" {
 		c.JSON(http.StatusBadRequest, model.NewErrorResponse(
 			"INVALID_PARAMETER",
-			err.Error(),
-			map[string]interface{}{
-				"min_length": MinQueryLength,
-				"provided":   utf8.RuneCountInString(strings.TrimSpace(keyword)),
-			},
+			message,
+			details,
 		))
 		return
 	}
@@ -496,13 +521,9 @@ func (h *WordHandler) SearchWords(c *gin.Context) {
 		return
 	}
 
-	results, meta, err := h.service.SearchWords(keyword, posCode, cefrLevel, oxfordLevel, cetLevel, maxFrequencyRank, minCollinsStars, limit, offset)
+	results, meta, err := h.service.SearchWords(c.Request.Context(), keyword, posCode, cefrLevel, oxfordLevel, cetLevel, maxFrequencyRank, minCollinsStars, limit, offset)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, model.NewErrorResponse(
-			"INTERNAL_ERROR",
-			err.Error(),
-			nil,
-		))
+		writeInternalError(c, "SearchWords", err)
 		return
 	}
 
@@ -511,8 +532,8 @@ func (h *WordHandler) SearchWords(c *gin.Context) {
 
 // SuggestWords handles GET /api/v1/suggest
 func (h *WordHandler) SuggestWords(c *gin.Context) {
-	prefix := c.Query("prefix")
-	if strings.TrimSpace(prefix) == "" {
+	prefix := trimmedQuery(c, "prefix")
+	if prefix == "" {
 		c.JSON(http.StatusBadRequest, model.NewErrorResponse(
 			"MISSING_PARAMETER",
 			"Query parameter 'prefix' is required",
@@ -521,15 +542,11 @@ func (h *WordHandler) SuggestWords(c *gin.Context) {
 		return
 	}
 
-	// Validate minimum query length
-	if err := validateQueryLength(prefix); err != nil {
+	if message, details := validateQueryLength(prefix, "Prefix", SuggestPrefixMaxLength); message != "" {
 		c.JSON(http.StatusBadRequest, model.NewErrorResponse(
 			"INVALID_PARAMETER",
-			err.Error(),
-			map[string]interface{}{
-				"min_length": MinQueryLength,
-				"provided":   utf8.RuneCountInString(strings.TrimSpace(prefix)),
-			},
+			message,
+			details,
 		))
 		return
 	}
@@ -564,13 +581,9 @@ func (h *WordHandler) SuggestWords(c *gin.Context) {
 		return
 	}
 
-	results, err := h.service.SuggestWords(prefix, cefrLevel, oxfordLevel, cetLevel, maxFrequencyRank, minCollinsStars, limit)
+	results, err := h.service.SuggestWords(c.Request.Context(), prefix, cefrLevel, oxfordLevel, cetLevel, maxFrequencyRank, minCollinsStars, limit)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, model.NewErrorResponse(
-			"INTERNAL_ERROR",
-			err.Error(),
-			nil,
-		))
+		writeInternalError(c, "SuggestWords", err)
 		return
 	}
 
@@ -607,13 +620,9 @@ func (h *WordHandler) SearchPhrases(c *gin.Context) {
 		return
 	}
 
-	results, err := h.service.SearchPhrases(keyword, limit)
+	results, err := h.service.SearchPhrases(c.Request.Context(), keyword, limit)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, model.NewErrorResponse(
-			"INTERNAL_ERROR",
-			err.Error(),
-			nil,
-		))
+		writeInternalError(c, "SearchPhrases", err)
 		return
 	}
 
@@ -632,9 +641,9 @@ func (h *WordHandler) GetPronunciations(c *gin.Context) {
 		return
 	}
 
-	pronunciations, err := h.service.GetPronunciations(headword, accentCode)
+	pronunciations, err := h.service.GetPronunciations(c.Request.Context(), headword, accentCode)
 	if err != nil {
-		if errors.Is(err, repository.ErrWordNotFound) {
+		if errors.Is(err, contracts.ErrWordNotFound) {
 			c.JSON(http.StatusNotFound, model.NewErrorResponse(
 				"WORD_NOT_FOUND",
 				"Word '"+headword+"' not found in dictionary",
@@ -642,11 +651,7 @@ func (h *WordHandler) GetPronunciations(c *gin.Context) {
 			))
 			return
 		}
-		c.JSON(http.StatusInternalServerError, model.NewErrorResponse(
-			"INTERNAL_ERROR",
-			err.Error(),
-			nil,
-		))
+		writeInternalError(c, "GetPronunciations", err)
 		return
 	}
 
@@ -665,7 +670,10 @@ func (h *WordHandler) GetSenses(c *gin.Context) {
 		return
 	}
 
-	lang := strings.ToLower(c.DefaultQuery("lang", "both"))
+	lang := strings.ToLower(trimmedQuery(c, "lang"))
+	if lang == "" {
+		lang = "both"
+	}
 	switch lang {
 	case "both", "en", "zh":
 	default:
@@ -677,9 +685,9 @@ func (h *WordHandler) GetSenses(c *gin.Context) {
 		return
 	}
 
-	senses, err := h.service.GetSenses(headword, posCode, lang)
+	senses, err := h.service.GetSenses(c.Request.Context(), headword, posCode, lang)
 	if err != nil {
-		if errors.Is(err, repository.ErrWordNotFound) {
+		if errors.Is(err, contracts.ErrWordNotFound) {
 			c.JSON(http.StatusNotFound, model.NewErrorResponse(
 				"WORD_NOT_FOUND",
 				"Word '"+headword+"' not found in dictionary",
@@ -687,11 +695,7 @@ func (h *WordHandler) GetSenses(c *gin.Context) {
 			))
 			return
 		}
-		c.JSON(http.StatusInternalServerError, model.NewErrorResponse(
-			"INTERNAL_ERROR",
-			err.Error(),
-			nil,
-		))
+		writeInternalError(c, "GetSenses", err)
 		return
 	}
 

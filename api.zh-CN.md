@@ -7,7 +7,7 @@
 ## 基础 URL 与版本
 
 - 本地开发时的默认基础 URL：`http://localhost:8080`
-- 所有端点根路径为 `/api/v1`
+- 词典与业务端点的根路径为 `/api/v1`；`/health` 等运维端点位于该前缀之外
 - 该服务当前未启用认证；生产环境运行时请应用自己的网关或代理
 
 ## 响应封装
@@ -32,7 +32,9 @@
   - `details` (任意类型)：可选的额外错误上下文
 - `meta` (对象|null)：可选的元数据，用于分页和统计
 
-**特殊情况：** `/health` 为简单起见返回不带封装的纯 JSON。
+词典相关端点的响应封装属于公开契约的一部分。为保持向后兼容，响应载荷不会做扁平化处理：单词对象仍使用 `headword` 和 `senses` 字段，发音数据仍保持 `pronunciations[]` 数组结构。
+
+**特殊情况：** `/health` 和 `/api/v1/health` 为简单起见返回不带封装的纯 JSON。
 
 ## 单词
 
@@ -93,13 +95,13 @@ curl "http://localhost:8080/api/v1/words/run?include_pronunciations=true&include
 
 ### GET /api/v1/search
 
-带排名和过滤器的模糊搜索。需要至少 3 个字符的 `q` 参数。
+带排名和过滤器的模糊搜索。要求 `q` 的归一化结果至少包含 3 个 Unicode 字符。
 
 | 查询参数 | 类型 | 默认值 | 说明 |
 |---------|------|--------|------|
-| `q` | string | — | 搜索关键词（最少 3 个字符，必需）|
+| `q` | string | — | 搜索关键词（必需；在去首尾空白、转小写并移除空格、连字符和下划线后，归一化结果至少 3 个 Unicode 字符）|
 | `pos` | string | — | 小写词性过滤器（见[词性](#词性)）|
-| `cefr_level` | int | — | 0-6（0 或省略 = 不过滤）|
+| `cefr_level` | string | — | `A1`、`A2`、`B1`、`B2`、`C1` 或 `C2`（不区分大小写）|
 | `oxford_level` | int | — | 0（任意）、1（牛津3000）、2（牛津5000）|
 | `cet_level` | int | — | 0（任意）、4（四级）、6（六级）|
 | `max_frequency_rank` | int | — | 保留排名 ≤ 此值的单词 |
@@ -111,10 +113,15 @@ curl "http://localhost:8080/api/v1/words/run?include_pronunciations=true&include
 
 搜索框的自动完成建议。使用与 `/search` 相同的过滤器语义。
 
-**参数：**
-- `prefix`（必需）：搜索前缀，最少 3 个字符
-- `limit`：默认 10，上限为 `API_SUGGEST_MAX_LIMIT`（默认：50）
-- 支持 `/search` 的所有过滤参数：`cefr_level`、`oxford_level`、`cet_level`、`max_frequency_rank`、`min_collins_stars`
+| 查询参数 | 类型 | 默认值 | 说明 |
+|---------|------|--------|------|
+| `prefix` | string | — | 搜索前缀（必需；在去首尾空白、转小写并移除空格、连字符和下划线后，归一化结果至少 3 个 Unicode 字符）|
+| `cefr_level` | string | — | `A1`、`A2`、`B1`、`B2`、`C1` 或 `C2`（不区分大小写）|
+| `oxford_level` | int | — | 0（任意）、1（牛津3000）、2（牛津5000）|
+| `cet_level` | int | — | 0（任意）、4（四级）、6（六级）|
+| `max_frequency_rank` | int | — | 保留排名 ≤ 此值的单词 |
+| `min_collins_stars` | int | — | 0-5（柯林斯最低星级）|
+| `limit` | int | 10 | 最大结果数（上限为 `API_SUGGEST_MAX_LIMIT`）|
 
 ### GET /api/v1/phrases
 
@@ -133,7 +140,7 @@ curl "http://localhost:8080/api/v1/phrases?q=run&limit=20"
 
 ### GET /health
 
-返回 HTTP 200 和 JSON 健康状态。用于容器编排器健康检查和监控。
+返回 HTTP 200 和 JSON 健康状态。适用于负载均衡器、可用性探针和其他轻量运维监控。
 
 **响应：**
 ```json
@@ -144,6 +151,28 @@ curl "http://localhost:8080/api/v1/phrases?q=run&limit=20"
 ```
 
 **注意：** 为简单起见，此端点不使用标准响应封装。
+
+### GET /api/v1/health
+
+readiness 端点。该端点会在请求上下文中执行数据库 ping，以确认 API 当前可连接 PostgreSQL。
+
+**成功响应（`200 OK`）：**
+```json
+{
+  "status": "ok",
+  "service": "isdict-api"
+}
+```
+
+**失败响应（`503 Service Unavailable`）：**
+```json
+{
+  "status": "not_ready",
+  "service": "isdict-api"
+}
+```
+
+**注意：** 此端点同样返回纯 JSON，不使用标准响应封装。
 
 ## 枚举
 
@@ -171,11 +200,19 @@ curl "http://localhost:8080/api/v1/phrases?q=run&limit=20"
 | `MISSING_PARAMETER` | 400 | 缺少必需的路径或查询参数 |
 | `INVALID_PARAMETER` | 400 | 提供的值验证失败 |
 | `BATCH_LIMIT_EXCEEDED` | 400 | 批量有效载荷超过配置的最大值 |
-| `INTERNAL_ERROR` | 500 | 未处理的服务端错误 |
+| `INTERNAL_ERROR` | 500 | 未处理的服务端错误；对外消息固定为 `An internal error occurred` |
+
+服务端内部错误细节会连同请求元数据一起记录到日志中，不会暴露在 API 响应体里。
+
+## 数据迁移权威来源
+
+数据迁移行为以 `isdict-commons/migration` 为权威实现。
+
+本仓库 `db/*.sql` 下的 SQL 文件仅作为参考夹具和一次性 PostgreSQL 兼容性验证之用，不应视为生产环境或兼容性保证下的规范迁移来源。
 
 ## 使用说明
 
-- `/search` 与 `/suggest` 端点强制要求最少 3 个 Unicode 字符，而 `/phrases` 接受 1-50 个字符
+- `/search` 与 `/suggest` 端点强制要求归一化后的查询长度至少为 3 个 Unicode 字符；归一化会去首尾空白、转小写，并移除空格、连字符和下划线；`/phrases` 接受 1-50 个去首尾空白后的字符
 - 所有字符串参数会自动去除空白字符
 - 枚举参数（口音、词性）不区分大小写并规范化为小写
 - 建议：为频繁访问的单词和建议实现客户端缓存
