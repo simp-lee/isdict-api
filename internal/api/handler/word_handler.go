@@ -8,8 +8,8 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/simp-lee/isdict-api/internal/api/contracts"
-	"github.com/simp-lee/isdict-api/internal/api/queryvalidation"
+	"github.com/simp-lee/isdict-data/queryvalidation"
+	"github.com/simp-lee/isdict-data/service"
 
 	"github.com/gin-gonic/gin"
 	"github.com/simp-lee/ginx"
@@ -18,7 +18,7 @@ import (
 )
 
 // WordServiceInterface defines the minimal service contract the handler needs.
-// Implementations should return contracts.ErrWordNotFound or contracts.ErrVariantNotFound
+// Implementations should return service.ErrWordNotFound or service.ErrVariantNotFound
 // when the requested resource does not exist.
 type WordServiceInterface interface {
 	GetWordByHeadword(ctx context.Context, headword string, accentCode *int, includeVariants, includePronunciations, includeSenses bool) (*model.WordResponse, error)
@@ -30,6 +30,8 @@ type WordServiceInterface interface {
 	GetPronunciations(ctx context.Context, headword string, accentCode *int) ([]model.PronunciationResponse, error)
 	GetSenses(ctx context.Context, headword string, posCode *int, lang string) ([]model.SenseResponse, error)
 }
+
+var _ WordServiceInterface = (*service.WordService)(nil)
 
 // WordHandler handles HTTP requests for word operations
 type WordHandler struct {
@@ -340,7 +342,7 @@ func (h *WordHandler) GetWord(c *gin.Context) {
 
 	word, err := h.service.GetWordByHeadword(c.Request.Context(), headword, accentCode, includeVariants, includePronunciations, includeSenses)
 	if err != nil {
-		if errors.Is(err, contracts.ErrWordNotFound) {
+		if errors.Is(err, service.ErrWordNotFound) {
 			c.JSON(http.StatusNotFound, model.NewErrorResponse(
 				"WORD_NOT_FOUND",
 				"Word '"+headword+"' not found in dictionary",
@@ -393,7 +395,7 @@ func (h *WordHandler) GetWordByVariant(c *gin.Context) {
 
 	words, err := h.service.GetWordsByVariant(c.Request.Context(), variant, kind, includePronunciations, includeSenses)
 	if err != nil {
-		if errors.Is(err, contracts.ErrVariantNotFound) {
+		if errors.Is(err, service.ErrVariantNotFound) {
 			c.JSON(http.StatusNotFound, model.NewErrorResponse(
 				"WORD_NOT_FOUND",
 				"Variant '"+variant+"' not found in dictionary",
@@ -643,7 +645,7 @@ func (h *WordHandler) GetPronunciations(c *gin.Context) {
 
 	pronunciations, err := h.service.GetPronunciations(c.Request.Context(), headword, accentCode)
 	if err != nil {
-		if errors.Is(err, contracts.ErrWordNotFound) {
+		if errors.Is(err, service.ErrWordNotFound) {
 			c.JSON(http.StatusNotFound, model.NewErrorResponse(
 				"WORD_NOT_FOUND",
 				"Word '"+headword+"' not found in dictionary",
@@ -687,7 +689,7 @@ func (h *WordHandler) GetSenses(c *gin.Context) {
 
 	senses, err := h.service.GetSenses(c.Request.Context(), headword, posCode, lang)
 	if err != nil {
-		if errors.Is(err, contracts.ErrWordNotFound) {
+		if errors.Is(err, service.ErrWordNotFound) {
 			c.JSON(http.StatusNotFound, model.NewErrorResponse(
 				"WORD_NOT_FOUND",
 				"Word '"+headword+"' not found in dictionary",

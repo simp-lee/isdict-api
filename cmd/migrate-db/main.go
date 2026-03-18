@@ -11,8 +11,8 @@ import (
 
 	"github.com/simp-lee/isdict-api/internal/applog"
 	"github.com/simp-lee/isdict-api/internal/config"
-	"github.com/simp-lee/isdict-api/internal/postgresutil"
 	"github.com/simp-lee/isdict-commons/migration"
+	"github.com/simp-lee/isdict-data/postgresutil"
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 )

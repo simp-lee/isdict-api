@@ -12,10 +12,10 @@ import (
 	"testing"
 
 	"github.com/gin-gonic/gin"
-	"github.com/simp-lee/isdict-api/internal/api/contracts"
 	"github.com/simp-lee/isdict-api/internal/api/middleware"
 	"github.com/simp-lee/isdict-api/internal/config"
 	"github.com/simp-lee/isdict-commons/model"
+	"github.com/simp-lee/isdict-data/service"
 )
 
 func TestSearchWordsHTTP_SuccessEnvelope(t *testing.T) {
@@ -390,7 +390,7 @@ func TestWordHandlerHTTP_NotFoundMappings(t *testing.T) {
 			path: "/api/v1/words/apple",
 			service: wordHandlerHTTPStubService{
 				getWordByHeadwordFunc: func(ctx context.Context, headword string, accentCode *int, includeVariants, includePronunciations, includeSenses bool) (*model.WordResponse, error) {
-					return nil, contracts.ErrWordNotFound
+					return nil, service.ErrWordNotFound
 				},
 			},
 			wantMessage: "Word 'apple' not found in dictionary",
@@ -400,7 +400,7 @@ func TestWordHandlerHTTP_NotFoundMappings(t *testing.T) {
 			path: "/api/v1/words/by-variant/running",
 			service: wordHandlerHTTPStubService{
 				getWordsByVariantFunc: func(ctx context.Context, variant string, kindStr *string, includePronunciations, includeSenses bool) ([]model.VariantReverseResponse, error) {
-					return nil, contracts.ErrVariantNotFound
+					return nil, service.ErrVariantNotFound
 				},
 			},
 			wantMessage: "Variant 'running' not found in dictionary",
@@ -410,7 +410,7 @@ func TestWordHandlerHTTP_NotFoundMappings(t *testing.T) {
 			path: "/api/v1/words/apple/pronunciations",
 			service: wordHandlerHTTPStubService{
 				getPronunciationsFunc: func(ctx context.Context, headword string, accentCode *int) ([]model.PronunciationResponse, error) {
-					return nil, contracts.ErrWordNotFound
+					return nil, service.ErrWordNotFound
 				},
 			},
 			wantMessage: "Word 'apple' not found in dictionary",
@@ -420,7 +420,7 @@ func TestWordHandlerHTTP_NotFoundMappings(t *testing.T) {
 			path: "/api/v1/words/apple/senses",
 			service: wordHandlerHTTPStubService{
 				getSensesFunc: func(ctx context.Context, headword string, posCode *int, lang string) ([]model.SenseResponse, error) {
-					return nil, contracts.ErrWordNotFound
+					return nil, service.ErrWordNotFound
 				},
 			},
 			wantMessage: "Word 'apple' not found in dictionary",

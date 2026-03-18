@@ -17,10 +17,10 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/lib/pq"
 	"github.com/simp-lee/isdict-api/internal/api/middleware"
-	"github.com/simp-lee/isdict-api/internal/api/repository"
-	"github.com/simp-lee/isdict-api/internal/api/service"
 	"github.com/simp-lee/isdict-api/internal/config"
 	"github.com/simp-lee/isdict-commons/model"
+	"github.com/simp-lee/isdict-data/repository"
+	"github.com/simp-lee/isdict-data/service"
 )
 
 func TestParseAccent_Valid(t *testing.T) {
@@ -697,7 +697,7 @@ func TestGetWordByVariant_ValidKindWithWhitespace(t *testing.T) {
 	}
 
 	cfg := &config.Config{}
-	service := service.NewWordService(repo, cfg)
+	service := service.NewWordService(repo, service.ServiceConfig{})
 	handler := NewWordHandler(service, cfg)
 
 	handler.GetWordByVariant(c)
@@ -736,7 +736,7 @@ func TestSearchWords_InternalErrorIsSanitizedAndLogged(t *testing.T) {
 
 	repo := &stubVariantRepository{searchErr: errors.New("database connection reset")}
 	cfg := &config.Config{APISearchMaxLimit: 50}
-	service := service.NewWordService(repo, cfg)
+	service := service.NewWordService(repo, service.ServiceConfig{SearchMaxLimit: 50})
 	handler := NewWordHandler(service, cfg)
 
 	var logBuffer bytes.Buffer

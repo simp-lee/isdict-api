@@ -938,8 +938,8 @@ func TestSampleDataSnapshotFailsOnNonEmptyDatabase(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected second sample_data import to fail on non-empty database")
 	}
-	if !strings.Contains(err.Error(), "duplicate key value") {
-		t.Fatalf("second sample_data import error = %v, want duplicate key failure", err)
+	if !strings.Contains(err.Error(), "SQLSTATE 23505") {
+		t.Fatalf("second sample_data import error = %v, want unique violation SQLSTATE 23505", err)
 	}
 }
 
@@ -1022,6 +1022,40 @@ func TestReferenceSQLSnapshotsFailWithoutPgTrgmPrivileges(t *testing.T) {
 	assertTableNotExists(t, fixtureSQLDB, "words")
 }
 
+func TestNormalizeSQLControlStatement_IgnoresLeadingComments(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name      string
+		statement string
+		want      string
+	}{
+		{
+			name:      "line comments before begin",
+			statement: "-- header\n-- more context\nBEGIN",
+			want:      "BEGIN",
+		},
+		{
+			name:      "block comment before commit",
+			statement: "/* header */\nCOMMIT",
+			want:      "COMMIT",
+		},
+		{
+			name:      "comments only",
+			statement: "-- header only",
+			want:      "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := normalizeSQLControlStatement(tt.statement); got != tt.want {
+				t.Fatalf("normalizeSQLControlStatement() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
 func mustReadFile(t *testing.T, path string) string {
 	t.Helper()
 	content, err := os.ReadFile(path)
@@ -1047,9 +1081,13 @@ func executeSQLFile(t *testing.T, db *sql.DB, path string) {
 		if trimmed == "" {
 			continue
 		}
+		control := normalizeSQLControlStatement(trimmed)
+		if control == "" {
+			continue
+		}
 
 		switch {
-		case strings.EqualFold(trimmed, "BEGIN"):
+		case strings.EqualFold(control, "BEGIN"):
 			if tx != nil {
 				t.Fatalf("nested BEGIN in %s", path)
 			}
@@ -1057,7 +1095,7 @@ func executeSQLFile(t *testing.T, db *sql.DB, path string) {
 			if err != nil {
 				t.Fatalf("begin transaction for %s: %v", path, err)
 			}
-		case strings.EqualFold(trimmed, "COMMIT"):
+		case strings.EqualFold(control, "COMMIT"):
 			if tx == nil {
 				t.Fatalf("COMMIT without active transaction in %s", path)
 			}
@@ -1100,9 +1138,13 @@ func executeSQLFileWithError(db *sql.DB, path string) error {
 		if trimmed == "" {
 			continue
 		}
+		control := normalizeSQLControlStatement(trimmed)
+		if control == "" {
+			continue
+		}
 
 		switch {
-		case strings.EqualFold(trimmed, "BEGIN"):
+		case strings.EqualFold(control, "BEGIN"):
 			if tx != nil {
 				return fmt.Errorf("nested BEGIN in %s", path)
 			}
@@ -1110,7 +1152,7 @@ func executeSQLFileWithError(db *sql.DB, path string) error {
 			if err != nil {
 				return fmt.Errorf("begin transaction for %s: %w", path, err)
 			}
-		case strings.EqualFold(trimmed, "COMMIT"):
+		case strings.EqualFold(control, "COMMIT"):
 			if tx == nil {
 				return fmt.Errorf("COMMIT without active transaction in %s", path)
 			}
@@ -1184,6 +1226,30 @@ func splitSQLStatements(content string) []string {
 	}
 
 	return statements
+}
+
+func normalizeSQLControlStatement(statement string) string {
+	trimmed := strings.TrimSpace(statement)
+	for trimmed != "" {
+		switch {
+		case strings.HasPrefix(trimmed, "--"):
+			newline := strings.IndexByte(trimmed, '\n')
+			if newline == -1 {
+				return ""
+			}
+			trimmed = strings.TrimSpace(trimmed[newline+1:])
+		case strings.HasPrefix(trimmed, "/*"):
+			end := strings.Index(trimmed[2:], "*/")
+			if end == -1 {
+				return trimmed
+			}
+			trimmed = strings.TrimSpace(trimmed[end+4:])
+		default:
+			return trimmed
+		}
+	}
+
+	return ""
 }
 
 type sqlSplitState struct {
@@ -1635,6 +1701,9 @@ func createRestrictedTestDatabase(t *testing.T, rolePrefix string, databasePrefi
 	password := "postgres"
 
 	if _, err := adminSQLDB.Exec("CREATE ROLE " + quoteIdentifier(roleName) + " LOGIN PASSWORD '" + password + "' NOSUPERUSER"); err != nil {
+		if strings.Contains(err.Error(), "SQLSTATE 42501") {
+			t.Skipf("admin PostgreSQL test DSN lacks CREATEROLE needed for restricted-role fixtures: %v", err)
+		}
 		t.Fatalf("create role %s: %v", roleName, err)
 	}
 	if _, err := adminSQLDB.Exec("CREATE DATABASE " + quoteIdentifier(databaseName) + " OWNER " + quoteIdentifier(roleName)); err != nil {

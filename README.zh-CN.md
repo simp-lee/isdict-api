@@ -178,7 +178,7 @@ go run ./tests/middleware/stress
 cmd/            应用入口
 configs/        环境变量模板
 db/             参考 SQL 与示例数据
-internal/       handler、service、repository、middleware、config
+internal/       API handler、middleware、应用日志、config
 tests/          中间件探针程序与测试
 web/            内置静态页面
 ```

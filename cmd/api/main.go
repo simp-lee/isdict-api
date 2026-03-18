@@ -18,11 +18,11 @@ import (
 
 	"github.com/simp-lee/isdict-api/internal/api/handler"
 	"github.com/simp-lee/isdict-api/internal/api/middleware"
-	"github.com/simp-lee/isdict-api/internal/api/repository"
-	"github.com/simp-lee/isdict-api/internal/api/service"
 	"github.com/simp-lee/isdict-api/internal/applog"
 	"github.com/simp-lee/isdict-api/internal/config"
-	"github.com/simp-lee/isdict-api/internal/postgresutil"
+	"github.com/simp-lee/isdict-data/postgresutil"
+	"github.com/simp-lee/isdict-data/repository"
+	"github.com/simp-lee/isdict-data/service"
 )
 
 type managedLogger = applog.ManagedLogger
@@ -121,7 +121,11 @@ func runWithDependencies(
 
 	// Initialize layers
 	repo := repository.NewRepository(db)
-	wordService := service.NewWordService(repo, cfg)
+	var wordService handler.WordServiceInterface = service.NewWordService(repo, service.ServiceConfig{
+		BatchMaxSize:    cfg.APIBatchMaxSize,
+		SearchMaxLimit:  cfg.APISearchMaxLimit,
+		SuggestMaxLimit: cfg.APISuggestMaxLimit,
+	})
 	wordHandler := handler.NewWordHandler(wordService, cfg)
 
 	// Setup router

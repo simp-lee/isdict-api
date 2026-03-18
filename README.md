@@ -180,7 +180,7 @@ PostgreSQL integration tests are guarded for disposable local or socket-based in
 cmd/            application entrypoints
 configs/        environment templates
 db/             reference SQL and sample data
-internal/       handlers, services, repositories, middleware, config
+internal/       api handlers, middleware, app logging, config
 tests/          middleware probe programs and tests
 web/            built-in static UI
 ```
