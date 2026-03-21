@@ -216,7 +216,6 @@ func TestRunWithDependencies_DropRequiresSecondConfirmation(t *testing.T) {
 		fixtures.newMigrator,
 		fixtures.ensureRequiredExtensions,
 		fixtures.verifyRequiredExtension,
-		fixtures.verifyIndexes,
 	)
 
 	if exitCode != 1 {
@@ -252,7 +251,6 @@ func TestRunWithDependencies_DropRunsMigrationWithConfirmedDestructiveOptions(t 
 		fixtures.newMigrator,
 		fixtures.ensureRequiredExtensions,
 		fixtures.verifyRequiredExtension,
-		fixtures.verifyIndexes,
 	)
 
 	if exitCode != 0 {
@@ -301,7 +299,6 @@ func TestRunWithDependencies_DropConfirmationBindsToConfiguredTargetInstance(t *
 		fixtures.newMigrator,
 		fixtures.ensureRequiredExtensions,
 		fixtures.verifyRequiredExtension,
-		fixtures.verifyIndexes,
 	)
 
 	if exitCode != 1 {
@@ -394,7 +391,6 @@ func TestRunWithDependencies_VerifyExitCodes(t *testing.T) {
 				fixtures.newMigrator,
 				fixtures.ensureRequiredExtensions,
 				fixtures.verifyRequiredExtension,
-				fixtures.verifyIndexes,
 			)
 
 			if exitCode != tt.wantExitCode {
@@ -444,7 +440,6 @@ func TestRunWithDependencies_MigrationErrorReturnsNonZero(t *testing.T) {
 		fixtures.newMigrator,
 		fixtures.ensureRequiredExtensions,
 		fixtures.verifyRequiredExtension,
-		fixtures.verifyIndexes,
 	)
 
 	if exitCode != 1 {
@@ -482,7 +477,6 @@ func TestRunWithDependencies_MigrationFailsWhenRequiredExtensionSetupFails(t *te
 		fixtures.newMigrator,
 		fixtures.ensureRequiredExtensions,
 		fixtures.verifyRequiredExtension,
-		fixtures.verifyIndexes,
 	)
 
 	if exitCode != 1 {
@@ -502,85 +496,6 @@ func TestRunWithDependencies_MigrationFailsWhenRequiredExtensionSetupFails(t *te
 	}
 	if len(fixtures.migrator.verifySkippedIndexes) != 0 {
 		t.Fatalf("verifySkippedIndexes = %v, want none", fixtures.migrator.verifySkippedIndexes)
-	}
-	if fixtures.openDBCalls != 1 || fixtures.closeCalls != 1 {
-		t.Fatalf("openDBCalls/closeCalls = %d/%d, want 1/1", fixtures.openDBCalls, fixtures.closeCalls)
-	}
-	assertLoggerCleanedUp(t, fixtures)
-}
-
-func TestRunWithDependencies_VerifyIgnoresMissingReferenceIndexesByDefault(t *testing.T) {
-	fixtures := newRunFixture()
-	fixtures.verifyIndexesErr = errors.New("missing required reference indexes: idx_words_frequency_rank")
-	var stdout bytes.Buffer
-	var stderr bytes.Buffer
-
-	exitCode := runWithDependencies(
-		[]string{"--verify"},
-		&stdout,
-		&stderr,
-		fixtures.loadConfig,
-		fixtures.newBootstrapLogger,
-		fixtures.newConfiguredLogger,
-		fixtures.openDB,
-		fixtures.newMigrator,
-		fixtures.ensureRequiredExtensions,
-		fixtures.verifyRequiredExtension,
-		fixtures.verifyIndexes,
-	)
-
-	if exitCode != 0 {
-		t.Fatalf("runWithDependencies() = %d, want 0", exitCode)
-	}
-	if fixtures.migrator.verifyCalls != 1 {
-		t.Fatalf("verifyCalls = %d, want 1", fixtures.migrator.verifyCalls)
-	}
-	if fixtures.ensureRequiredExtensionsCalls != 0 {
-		t.Fatalf("ensureRequiredExtensionsCalls = %d, want 0", fixtures.ensureRequiredExtensionsCalls)
-	}
-	if fixtures.verifyRequiredExtensionCalls != 1 {
-		t.Fatalf("verifyRequiredExtensionCalls = %d, want 1", fixtures.verifyRequiredExtensionCalls)
-	}
-	if fixtures.openDBCalls != 1 || fixtures.closeCalls != 1 {
-		t.Fatalf("openDBCalls/closeCalls = %d/%d, want 1/1", fixtures.openDBCalls, fixtures.closeCalls)
-	}
-	assertLoggerCleanedUp(t, fixtures)
-}
-
-func TestRunWithDependencies_MigrationIgnoresMissingReferenceIndexesByDefault(t *testing.T) {
-	fixtures := newRunFixture()
-	fixtures.verifyIndexesErr = errors.New("missing required reference indexes: idx_words_frequency_rank")
-	var stdout bytes.Buffer
-	var stderr bytes.Buffer
-
-	exitCode := runWithDependencies(
-		nil,
-		&stdout,
-		&stderr,
-		fixtures.loadConfig,
-		fixtures.newBootstrapLogger,
-		fixtures.newConfiguredLogger,
-		fixtures.openDB,
-		fixtures.newMigrator,
-		fixtures.ensureRequiredExtensions,
-		fixtures.verifyRequiredExtension,
-		fixtures.verifyIndexes,
-	)
-
-	if exitCode != 0 {
-		t.Fatalf("runWithDependencies() = %d, want 0", exitCode)
-	}
-	if fixtures.migrator.migrateCalls != 1 {
-		t.Fatalf("migrateCalls = %d, want 1", fixtures.migrator.migrateCalls)
-	}
-	if fixtures.migrator.verifyCalls != 1 {
-		t.Fatalf("verifyCalls = %d, want 1", fixtures.migrator.verifyCalls)
-	}
-	if fixtures.ensureRequiredExtensionsCalls != 1 {
-		t.Fatalf("ensureRequiredExtensionsCalls = %d, want 1", fixtures.ensureRequiredExtensionsCalls)
-	}
-	if fixtures.verifyRequiredExtensionCalls != 0 {
-		t.Fatalf("verifyRequiredExtensionCalls = %d, want 0", fixtures.verifyRequiredExtensionCalls)
 	}
 	if fixtures.openDBCalls != 1 || fixtures.closeCalls != 1 {
 		t.Fatalf("openDBCalls/closeCalls = %d/%d, want 1/1", fixtures.openDBCalls, fixtures.closeCalls)
@@ -611,7 +526,6 @@ func TestRunWithDependencies_RestoresDefaultLoggerAcrossRepeatedRuns(t *testing.
 			fixtures.newMigrator,
 			fixtures.ensureRequiredExtensions,
 			fixtures.verifyRequiredExtension,
-			fixtures.verifyIndexes,
 		)
 
 		if exitCode != 1 {
@@ -690,7 +604,6 @@ func TestRunWithDependencies_FailsWithoutPgTrgmPrivileges(t *testing.T) {
 		func(db *gorm.DB) migrationRunner { return migration.NewMigrator(db) },
 		ensureRequiredExtensionsEnabled,
 		verifyRequiredExtensionPresent,
-		nil,
 	)
 	if exitCode != 1 {
 		t.Fatalf("runWithDependencies(migrate) = %d, want 1", exitCode)
@@ -707,7 +620,6 @@ func TestRunWithDependencies_FailsWithoutPgTrgmPrivileges(t *testing.T) {
 		func(db *gorm.DB) migrationRunner { return migration.NewMigrator(db) },
 		ensureRequiredExtensionsEnabled,
 		verifyRequiredExtensionPresent,
-		nil,
 	)
 	if exitCode != 1 {
 		t.Fatalf("runWithDependencies(--verify) = %d, want 1", exitCode)
@@ -731,38 +643,6 @@ func TestRunWithDependencies_FailsWithoutPgTrgmPrivileges(t *testing.T) {
 	assertTableNotExists(t, fixtureSQLDB, "words")
 }
 
-func TestMissingRequiredIndexes(t *testing.T) {
-	missing := missingRequiredIndexes(
-		[]string{" IDX_WORDS_HEADWORD_NORMALIZED ", "idx_words_cefr_level", "idx_word_variants_word_id"},
-		[]string{"idx_words_headword_normalized", "idx_words_frequency_rank", "idx_word_variants_word_id"},
-	)
-
-	if len(missing) != 1 {
-		t.Fatalf("len(missing) = %d, want 1", len(missing))
-	}
-	if missing[0] != "idx_words_frequency_rank" {
-		t.Fatalf("missing[0] = %q, want %q", missing[0], "idx_words_frequency_rank")
-	}
-}
-
-func TestRequiredReferenceIndexes(t *testing.T) {
-	required := requiredReferenceIndexes()
-	for _, name := range []string{
-		"idx_pronunciations_word_id",
-		"idx_senses_word_id",
-		"idx_examples_sense_id",
-	} {
-		if !containsString(required, name) {
-			t.Fatalf("requiredReferenceIndexes() missing %s", name)
-		}
-	}
-	for _, name := range trigramReferenceIndexes {
-		if !containsString(required, name) {
-			t.Fatalf("requiredReferenceIndexes() missing %s", name)
-		}
-	}
-}
-
 // AC-B2.5: No code should attempt to treat GIN as a PostgreSQL extension.
 func TestRequiredExtensionNameIsPgTrgmOnly(t *testing.T) {
 	if requiredExtensionName != "pg_trgm" {
@@ -773,48 +653,9 @@ func TestRequiredExtensionNameIsPgTrgmOnly(t *testing.T) {
 	}
 }
 
-func TestReferenceSQLSnapshotsStayCompatible(t *testing.T) {
-	schemaPath := filepath.Join("..", "..", "db", "schema.sql")
-	indexesPath := filepath.Join("..", "..", "db", "indexes.sql")
-	sampleDataPath := filepath.Join("..", "..", "db", "sample_data.sql")
+func TestSampleDataSnapshotStaysCompatible(t *testing.T) {
+	sampleDataSQL := mustReadFile(t, filepath.Join("..", "..", "db", "sample_data.sql"))
 
-	schemaSQL := mustReadFile(t, schemaPath)
-	indexesSQL := mustReadFile(t, indexesPath)
-	sampleDataSQL := mustReadFile(t, sampleDataPath)
-	assertReferenceSnapshotCore(t, schemaSQL, indexesSQL, sampleDataSQL)
-	assertReferenceSnapshotSnippets(t, sampleDataSQL, indexesSQL, schemaSQL)
-	assertReferenceSnapshotDropDocs(t, schemaSQL, indexesSQL)
-}
-
-// AC-B2.5: No code should attempt to treat GIN as a PostgreSQL extension.
-func TestReferenceSQLSnapshotsDoNotMentionGinAsExtension(t *testing.T) {
-	snapshots := strings.ToLower(strings.Join([]string{
-		mustReadFile(t, filepath.Join("..", "..", "db", "schema.sql")),
-		mustReadFile(t, filepath.Join("..", "..", "db", "indexes.sql")),
-		mustReadFile(t, filepath.Join("..", "..", "db", "sample_data.sql")),
-	}, "\n"))
-
-	for _, forbidden := range []string{
-		"create extension gin",
-		"create extension if not exists gin",
-		"extname = 'gin'",
-		"extname='gin'",
-		"required extension gin",
-	} {
-		if strings.Contains(snapshots, forbidden) {
-			t.Fatalf("reference SQL snapshots must not model gin as an extension: found %q", forbidden)
-		}
-	}
-}
-
-func assertReferenceSnapshotCore(t *testing.T, schemaSQL, indexesSQL, sampleDataSQL string) {
-	t.Helper()
-	if strings.Contains(schemaSQL, "UNIQUE (word_id, variant_text, kind, COALESCE(form_type, 0))") {
-		t.Fatalf("schema snapshot still contains invalid table-level expression unique constraint")
-	}
-	if !strings.Contains(indexesSQL, "CREATE UNIQUE INDEX IF NOT EXISTS idx_word_variant_unique") {
-		t.Fatalf("indexes snapshot must remain the authoritative unique expression definition")
-	}
 	if strings.Contains(sampleDataSQL, "DO UPDATE") {
 		t.Fatalf("sample data snapshot must fail closed instead of overwriting existing dictionary rows")
 	}
@@ -827,59 +668,25 @@ func assertReferenceSnapshotCore(t *testing.T, schemaSQL, indexesSQL, sampleData
 	if !strings.Contains(sampleDataSQL, "Load this file only into an empty disposable database") {
 		t.Fatalf("sample data snapshot must document the empty disposable database requirement")
 	}
-	if !strings.Contains(schemaSQL, "COMMENT ON COLUMN word_variants.form_type IS 'Form type: 1=past, 2=past_participle, 3=present_3rd, 4=gerund, 5=plural, etc.';") {
-		t.Fatalf("schema snapshot must document authoritative form_type semantics")
-	}
-}
 
-func assertReferenceSnapshotSnippets(t *testing.T, sampleDataSQL, indexesSQL, schemaSQL string) {
-	t.Helper()
 	assertSnapshotContainsAll(t, sampleDataSQL, []string{
 		"('run', 'ran', 'ran', 1, 1, 1024, 38765)",
 		"('run', 'runs', 'runs', 1, 3, 756, 52341)",
 		"('program', 'programs', 'programs', 1, 5, 1567, 23456)",
-	}, "sample data snapshot missing expected form_type mapping: %s")
-	assertSnapshotContainsAll(t, indexesSQL, []string{
-		"idx_words_headword_normalized",
-		"idx_words_frequency_rank",
-		"idx_pronunciations_word_id",
-		"idx_senses_word_id",
-		"idx_examples_sense_id",
-		"idx_word_variants_variant_text",
-		"idx_word_variants_word_id",
-	}, "indexes snapshot missing major index %s")
-	assertSnapshotContainsAll(t, schemaSQL+"\n"+indexesSQL, []string{
-		"CREATE EXTENSION IF NOT EXISTS pg_trgm",
-		"CREATE INDEX IF NOT EXISTS idx_words_headword_trgm ON words USING gin(headword_normalized gin_trgm_ops)",
-		"CREATE INDEX IF NOT EXISTS idx_word_variants_headword_trgm ON word_variants USING gin(headword_normalized gin_trgm_ops)",
-	}, "reference SQL snapshots missing required pg_trgm snippet %q")
-	assertSnapshotContainsAll(t, indexesSQL, []string{
-		"idx_pronunciations_word_id",
-		"idx_senses_word_id",
-		"idx_examples_sense_id",
-	}, "indexes snapshot should include foreign-key index %s")
-	assertSnapshotContainsAll(t, indexesSQL, []string{
-		"• Unique indexes: 2 (data integrity)",
-		"• Non-unique B-tree indexes: 14 (exact/prefix/range/filter/join queries)",
-		"• GIN trigram indexes: 4 (fuzzy search optimization)",
-		"• Total: 20 indexes when pg_trgm is enabled",
-	}, "indexes snapshot missing expected summary line %q")
-}
+		"school_level",
+		"ip_a",
+	}, "sample data snapshot missing expected snippet %s")
 
-func assertReferenceSnapshotDropDocs(t *testing.T, schemaSQL, indexesSQL string) {
-	t.Helper()
-	confirmedDropCommand := fmt.Sprintf("go run cmd/migrate-db/main.go --drop --force --confirm-drop %s", dropConfirmationExampleTarget)
-	if !strings.Contains(schemaSQL, confirmedDropCommand) {
-		t.Fatalf("schema snapshot header must document confirmed drop syntax")
-	}
-	if !strings.Contains(indexesSQL, confirmedDropCommand) {
-		t.Fatalf("indexes snapshot header must document confirmed drop syntax")
-	}
-	if strings.Contains(schemaSQL, "go run cmd/migrate-db/main.go --drop") && !strings.Contains(schemaSQL, confirmedDropCommand) {
-		t.Fatalf("schema snapshot header still references obsolete drop syntax")
-	}
-	if strings.Contains(indexesSQL, "go run cmd/migrate-db/main.go --drop") && !strings.Contains(indexesSQL, confirmedDropCommand) {
-		t.Fatalf("indexes snapshot header still references obsolete drop syntax")
+	for _, forbidden := range []string{
+		"create extension gin",
+		"create extension if not exists gin",
+		"extname = 'gin'",
+		"extname='gin'",
+		"required extension gin",
+	} {
+		if strings.Contains(strings.ToLower(sampleDataSQL), forbidden) {
+			t.Fatalf("sample data snapshot must not model gin as an extension: found %q", forbidden)
+		}
 	}
 }
 
@@ -900,10 +707,39 @@ func TestMakefileRequiresFixtureConfirmation(t *testing.T) {
 		"error: set CONFIRM_FIXTURES to $$EXPECTED_CONFIRM_VALUE",
 		"error: CONFIRM_FIXTURES must exactly match $$EXPECTED_CONFIRM_VALUE",
 		"db-fixtures only runs against an empty dictionary dataset",
-		"SELECT EXISTS (SELECT 1 FROM words LIMIT 1)",
+		"to_regclass('public.words')",
+		"EXISTS (SELECT 1 FROM words LIMIT 1)",
 	} {
 		if !strings.Contains(makefile, snippet) {
 			t.Fatalf("Makefile is missing fixture confirmation guard snippet %q", snippet)
+		}
+	}
+}
+
+func TestMakefileDefaultTestsRequireRealPostgresDSNs(t *testing.T) {
+	makefile := mustReadFile(t, filepath.Join("..", "..", "Makefile"))
+
+	for _, snippet := range []string{
+		"resolve_test_postgres_env",
+		"TEST_POSTGRES_DSN_VALUE",
+		"TEST_POSTGRES_ADMIN_DSN_VALUE",
+		"make test requires TEST_POSTGRES_DSN",
+		"verify_test_postgres_prerequisites",
+		"CASE WHEN rolcreatedb THEN 'ok'",
+		"make test requires TEST_POSTGRES_ADMIN_DSN current_user to have CREATEDB",
+		"TEST_POSTGRES_DSN=\"$$TEST_POSTGRES_DSN_VALUE\" TEST_POSTGRES_ADMIN_DSN=\"$$TEST_POSTGRES_ADMIN_DSN_VALUE\"",
+	} {
+		if !strings.Contains(makefile, snippet) {
+			t.Fatalf("Makefile is missing default PostgreSQL test guard snippet %q", snippet)
+		}
+	}
+
+	for _, forbidden := range []string{
+		"rolcreatedb AND rolcreaterole",
+		"make test requires TEST_POSTGRES_ADMIN_DSN current_user to have CREATEDB and CREATEROLE",
+	} {
+		if strings.Contains(makefile, forbidden) {
+			t.Fatalf("Makefile still contains outdated blanket privilege gate %q", forbidden)
 		}
 	}
 }
@@ -926,13 +762,8 @@ func TestSampleDataSnapshotFailsOnNonEmptyDatabase(t *testing.T) {
 		_ = sqlDB.Close()
 	})
 
-	for _, path := range []string{
-		filepath.Join("..", "..", "db", "schema.sql"),
-		filepath.Join("..", "..", "db", "indexes.sql"),
-		filepath.Join("..", "..", "db", "sample_data.sql"),
-	} {
-		executeSQLFile(t, sqlDB, path)
-	}
+	migrateAuthoritativeTestSchema(t, gormDB)
+	executeSQLFile(t, sqlDB, filepath.Join("..", "..", "db", "sample_data.sql"))
 
 	err = executeSQLFileWithError(sqlDB, filepath.Join("..", "..", "db", "sample_data.sql"))
 	if err == nil {
@@ -943,8 +774,8 @@ func TestSampleDataSnapshotFailsOnNonEmptyDatabase(t *testing.T) {
 	}
 }
 
-func TestReferenceSQLSnapshotsExecuteAgainstPostgres(t *testing.T) {
-	dsn := createAdminOwnedTestDatabase(t, "sql_snapshots")
+func TestSampleDataSnapshotExecutesAgainstPostgres(t *testing.T) {
+	dsn := createAdminOwnedTestDatabase(t, "sample_data")
 
 	gormDB, err := gorm.Open(pgdriver.Open(dsn), &gorm.Config{
 		Logger: gormlogger.Default.LogMode(gormlogger.Silent),
@@ -961,13 +792,8 @@ func TestReferenceSQLSnapshotsExecuteAgainstPostgres(t *testing.T) {
 		_ = sqlDB.Close()
 	})
 
-	for _, path := range []string{
-		filepath.Join("..", "..", "db", "schema.sql"),
-		filepath.Join("..", "..", "db", "indexes.sql"),
-		filepath.Join("..", "..", "db", "sample_data.sql"),
-	} {
-		executeSQLFile(t, sqlDB, path)
-	}
+	migrateAuthoritativeTestSchema(t, gormDB)
+	executeSQLFile(t, sqlDB, filepath.Join("..", "..", "db", "sample_data.sql"))
 
 	assertTableRowCount(t, sqlDB, "words", 10)
 	assertTableRowCount(t, sqlDB, "pronunciations", 10)
@@ -991,35 +817,6 @@ func TestReferenceSQLSnapshotsExecuteAgainstPostgres(t *testing.T) {
 	assertWordVariantFormType(t, sqlDB, "programs", 5)
 	assertSenseCEFRSource(t, sqlDB, "hello", 9, 1, "oxford")
 	assertSenseCEFRSource(t, sqlDB, "program", 2, 2, "oxford")
-}
-
-func TestReferenceSQLSnapshotsFailWithoutPgTrgmPrivileges(t *testing.T) {
-	fixtureDSN := createRestrictedTestDatabase(t, "fixture_user", "fixture_sql_setup")
-
-	fixtureDB, err := gorm.Open(pgdriver.Open(fixtureDSN), &gorm.Config{
-		Logger: gormlogger.Default.LogMode(gormlogger.Silent),
-	})
-	if err != nil {
-		t.Fatalf("gorm.Open() fixture error = %v", err)
-	}
-
-	fixtureSQLDB, err := fixtureDB.DB()
-	if err != nil {
-		t.Fatalf("fixtureDB.DB() error = %v", err)
-	}
-	t.Cleanup(func() {
-		_ = fixtureSQLDB.Close()
-	})
-
-	schemaPath := filepath.Join("..", "..", "db", "schema.sql")
-	if err := executeSQLFileWithError(fixtureSQLDB, schemaPath); err == nil {
-		t.Fatalf("executeSQLFile(%s) unexpectedly succeeded without pg_trgm privileges", schemaPath)
-	} else if !strings.Contains(err.Error(), "permission denied") {
-		t.Fatalf("executeSQLFile(%s) error = %v, want permission denied", schemaPath, err)
-	}
-
-	assertExtensionNotEnabled(t, fixtureSQLDB, "pg_trgm")
-	assertTableNotExists(t, fixtureSQLDB, "words")
 }
 
 func TestNormalizeSQLControlStatement_IgnoresLeadingComments(t *testing.T) {
@@ -1183,6 +980,27 @@ func executeSQLFileWithError(db *sql.DB, path string) error {
 	}
 
 	return nil
+}
+
+func migrateAuthoritativeTestSchema(t *testing.T, db *gorm.DB) {
+	t.Helper()
+
+	if err := ensureRequiredExtensionsEnabled(db); err != nil {
+		t.Fatalf("ensureRequiredExtensionsEnabled() error = %v", err)
+	}
+
+	migrator := migration.NewMigrator(db)
+	if err := migrator.Migrate(&migration.MigrateOptions{}); err != nil {
+		t.Fatalf("migrator.Migrate() error = %v", err)
+	}
+
+	status, err := migrator.VerifyMigration(nil, nil)
+	if err != nil {
+		t.Fatalf("migrator.VerifyMigration() error = %v", err)
+	}
+	if err := requireSuccessfulVerification(status); err != nil {
+		t.Fatalf("requireSuccessfulVerification() error = %v; status=%+v", err, status)
+	}
 }
 
 func splitSQLStatements(content string) []string {
@@ -1453,15 +1271,6 @@ func assertTableNotExists(t *testing.T, db *sql.DB, table string) {
 	}
 }
 
-func containsString(values []string, want string) bool {
-	for _, value := range values {
-		if value == want {
-			return true
-		}
-	}
-	return false
-}
-
 type runFixture struct {
 	bootstrapLogger               *stubManagedLogger
 	configuredLogger              *stubManagedLogger
@@ -1469,7 +1278,6 @@ type runFixture struct {
 	loadConfig                    func() (*config.Config, error)
 	ensureRequiredExtensionsErr   error
 	verifyRequiredExtensionErr    error
-	verifyIndexesErr              error
 	ensureRequiredExtensionsCalls int
 	verifyRequiredExtensionCalls  int
 	openDBCalls                   int
@@ -1532,10 +1340,6 @@ func (f *runFixture) ensureRequiredExtensions(*gorm.DB) error {
 func (f *runFixture) verifyRequiredExtension(*gorm.DB) error {
 	f.verifyRequiredExtensionCalls++
 	return f.verifyRequiredExtensionErr
-}
-
-func (f *runFixture) verifyIndexes(*gorm.DB) error {
-	return f.verifyIndexesErr
 }
 
 func assertLoggerCleanedUp(t *testing.T, fixtures *runFixture) {

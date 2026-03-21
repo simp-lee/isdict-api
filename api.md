@@ -36,6 +36,18 @@ The envelope remains part of the public contract for dictionary endpoints. Respo
 
 **Special case:** `/health` and `/api/v1/health` return plain JSON without the envelope for simplicity.
 
+## Shared Annotation Fields
+
+Dictionary payloads that return words, variants, search results, suggestions, or phrases reuse the upstream `WordAnnotations` field set.
+
+This shared block now includes `school_level` as an integer passthrough field:
+
+| Field | Type | Meaning |
+|-------|------|---------|
+| `school_level` | int | Recommended learning stage for Chinese English learners: `0=unknown`, `1=junior middle school`, `2=senior high school`, `3=university` |
+
+The API intentionally returns the numeric code instead of a localized label so clients can render their own text or badge styles.
+
 ## Words
 
 ### GET /api/v1/words/{headword}
@@ -210,7 +222,7 @@ Server-side internal error details are logged with request metadata and are not 
 
 Data migration behavior is defined by `isdict-commons/migration` and should be treated as the authoritative implementation.
 
-SQL files under `db/*.sql` in this repository are provided only as reference fixtures and for compatibility checks against disposable PostgreSQL databases; they are not the canonical migration source for production or compatibility guarantees.
+The only SQL file kept under `db/` in this repository is `db/sample_data.sql`, which is disposable sample data for test or local fixture loading. It is not the canonical migration source for production or compatibility guarantees.
 
 ## Usage Notes
 

@@ -115,8 +115,7 @@ Helper targets:
 - `make db-setup`: run the migration CLI
 - `make db-verify`: verify migration-managed objects through the migration CLI
 - `make db-reset`: guarded reset flow; requires `CONFIRM_DROP` to exactly match the target database
-- `make db-fixtures`: load `db/sample_data.sql` into an empty migrated database only; requires `CONFIRM_FIXTURES`
-- `make db-sql-setup`: apply reference SQL from `db/` for testing or fixture work; `pg_trgm` must already be available
+- `make db-fixtures`: for an empty target database, rebuild migration-managed tables through the authoritative migration CLI and then load `db/sample_data.sql`; requires `CONFIRM_FIXTURES`
 
 All four database helper targets resolve connection settings in the same order: exported `DB_*`, then exported `PG*`, then the file pointed to by `ISDICT_API_ENV_FILE` (default `configs/api.env` in the Makefile).
 
@@ -142,6 +141,12 @@ Current request rules worth knowing:
 - `/suggest` requires `prefix`; default `limit` is `10`
 - `/phrases` requires `q`; max `limit` is `50`
 - `/health` and `/api/v1/health` return plain JSON, not the standard response envelope
+
+Current response fields worth knowing:
+
+- Word-like payloads returned by `/api/v1/words`, `/api/v1/words/by-variant`, `/api/v1/words/batch`, `/api/v1/search`, `/api/v1/suggest`, and `/api/v1/phrases` include the shared upstream annotation block
+- That annotation block now includes `school_level` with numeric codes `0=unknown`, `1=junior middle school`, `2=senior high school`, `3=university`
+- The API returns `school_level` as an integer passthrough so clients can choose their own labels or badge styles
 
 ## Middleware Notes
 
@@ -170,6 +175,8 @@ go run ./tests/middleware/verify
 go run ./tests/middleware/stress
 ```
 
+`make test` and `make test-coverage` now fail closed unless a disposable real PostgreSQL DSN is available. They honor exported `TEST_POSTGRES_DSN` and `TEST_POSTGRES_ADMIN_DSN` first, then derive both values from `DB_*`, `PG*`, or the file pointed to by `ISDICT_API_ENV_FILE` (default `configs/api.env`). The effective `TEST_POSTGRES_ADMIN_DSN` must connect as a role that has `CREATEDB`, because the real PostgreSQL suites create disposable databases through upstream helpers. Restricted-role migration fixtures still attempt `CREATEROLE` only inside their dedicated test path and skip that subset when the admin DSN lacks role-creation privileges.
+
 The middleware probe clients assume `http://localhost:8080` unless you override them with environment variables.
 
 PostgreSQL integration tests are guarded for disposable local or socket-based instances by default. To intentionally run them against a disposable non-local PostgreSQL instance, set `ISDICT_ALLOW_NONLOCAL_TEST_POSTGRES=true` alongside `TEST_POSTGRES_DSN` and, for migration tests that create databases or roles, `TEST_POSTGRES_ADMIN_DSN`.
@@ -179,7 +186,7 @@ PostgreSQL integration tests are guarded for disposable local or socket-based in
 ```text
 cmd/            application entrypoints
 configs/        environment templates
-db/             reference SQL and sample data
+db/             sample fixture data
 internal/       api handlers, middleware, app logging, config
 tests/          middleware probe programs and tests
 web/            built-in static UI

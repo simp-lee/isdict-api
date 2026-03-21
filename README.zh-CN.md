@@ -115,8 +115,7 @@ go run ./cmd/migrate-db --drop --force --confirm-drop postgres@db.example.com:54
 - `make db-setup`：执行迁移工具
 - `make db-verify`：通过迁移工具校验受迁移管理的数据库对象
 - `make db-reset`：带确认的重置流程；要求 `CONFIRM_DROP` 与目标库完全匹配
-- `make db-fixtures`：只向已迁移且为空的数据库导入 `db/sample_data.sql`；要求 `CONFIRM_FIXTURES`
-- `make db-sql-setup`：为测试或夹具工作应用 `db/` 下的参考 SQL；要求环境中已可用 `pg_trgm`
+- `make db-fixtures`：针对空目标库，先通过权威迁移工具重建受迁移管理的表，再导入 `db/sample_data.sql`；要求 `CONFIRM_FIXTURES`
 
 这四个数据库辅助命令现在使用统一的连接参数解析顺序：先读已导出的 `DB_*`，再读已导出的 `PG*`，最后回退到 `ISDICT_API_ENV_FILE` 指向的配置文件（Makefile 默认值为 `configs/api.env`）。
 
@@ -142,6 +141,12 @@ go run ./cmd/migrate-db --drop --force --confirm-drop postgres@db.example.com:54
 - `/suggest` 必须提供 `prefix`，默认 `limit=10`
 - `/phrases` 必须提供 `q`，且 `limit` 最大为 `50`
 - `/health` 和 `/api/v1/health` 返回纯 JSON，不使用标准响应封装
+
+当前实现中需要注意的响应字段：
+
+- `/api/v1/words`、`/api/v1/words/by-variant`、`/api/v1/words/batch`、`/api/v1/search`、`/api/v1/suggest`、`/api/v1/phrases` 返回的词类载荷都会包含上游共享注解字段
+- 这组共享注解字段现在包含 `school_level`，数值含义为 `0=unknown`、`1=初中`、`2=高中`、`3=大学`
+- API 会按整数值透传 `school_level`，由调用方自行决定展示文本或徽标样式
 
 ## 中间件说明
 
@@ -177,7 +182,7 @@ go run ./tests/middleware/stress
 ```text
 cmd/            应用入口
 configs/        环境变量模板
-db/             参考 SQL 与示例数据
+db/             示例夹具数据
 internal/       API handler、middleware、应用日志、config
 tests/          中间件探针程序与测试
 web/            内置静态页面

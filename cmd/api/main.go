@@ -9,6 +9,8 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
+	"runtime"
 	"syscall"
 	"time"
 
@@ -196,6 +198,26 @@ func checkReadiness(ctx context.Context, sqlDB *sql.DB) error {
 	return postgresutil.CheckRequiredExtensionPresent(ctx, sqlDB)
 }
 
+func registerReadinessRoute(group *gin.RouterGroup, cfg *config.Config, sqlDB *sql.DB, readinessCheck func(context.Context, *sql.DB) error) {
+	group.GET("/health", func(c *gin.Context) {
+		ctx, cancel := context.WithTimeout(c.Request.Context(), readinessPingTimeout(cfg))
+		defer cancel()
+
+		if err := readinessCheck(ctx, sqlDB); err != nil {
+			c.JSON(http.StatusServiceUnavailable, gin.H{
+				"status":  "not_ready",
+				"service": "isdict-api",
+			})
+			return
+		}
+
+		c.JSON(http.StatusOK, gin.H{
+			"status":  "ok",
+			"service": "isdict-api",
+		})
+	})
+}
+
 func readinessPingTimeout(cfg *config.Config) time.Duration {
 	if cfg == nil || cfg.TimeoutSeconds < 1 {
 		return time.Second
@@ -258,23 +280,7 @@ func setupRouter(wordHandler *handler.WordHandler, cfg *config.Config, sqlDB *sq
 	// API v1 routes
 	v1 := router.Group("/api/v1")
 	{
-		v1.GET("/health", func(c *gin.Context) {
-			ctx, cancel := context.WithTimeout(c.Request.Context(), readinessPingTimeout(cfg))
-			defer cancel()
-
-			if err := checkReadiness(ctx, sqlDB); err != nil {
-				c.JSON(http.StatusServiceUnavailable, gin.H{
-					"status":  "not_ready",
-					"service": "isdict-api",
-				})
-				return
-			}
-
-			c.JSON(http.StatusOK, gin.H{
-				"status":  "ok",
-				"service": "isdict-api",
-			})
-		})
+		registerReadinessRoute(v1, cfg, sqlDB, checkReadiness)
 
 		// P0 Core endpoints
 		v1.GET("/words/:headword", wordHandler.GetWord)
@@ -289,8 +295,74 @@ func setupRouter(wordHandler *handler.WordHandler, cfg *config.Config, sqlDB *sq
 
 	// Serve the bundled web UI directly from the API process.
 	// Deployments can still offload these routes to a reverse proxy if desired.
-	router.Static("/static/js", "./web/js")
-	router.StaticFile("/", "./web/index.html")
+	if assetRoot := resolveWebAssetRoot(); assetRoot != "" {
+		router.Static("/static/js", filepath.Join(assetRoot, "js"))
+		router.StaticFile("/", filepath.Join(assetRoot, "index.html"))
+	}
 
 	return router
+}
+
+func resolveWebAssetRoot() string {
+	for _, candidate := range webAssetRootCandidates() {
+		if isWebAssetRoot(candidate) {
+			return candidate
+		}
+	}
+
+	return ""
+}
+
+func webAssetRootCandidates() []string {
+	candidates := make([]string, 0, 4)
+	seen := make(map[string]struct{}, 4)
+
+	addCandidate := func(path string) {
+		if path == "" {
+			return
+		}
+
+		cleaned := filepath.Clean(path)
+		if _, ok := seen[cleaned]; ok {
+			return
+		}
+
+		seen[cleaned] = struct{}{}
+		candidates = append(candidates, cleaned)
+	}
+
+	if cwd, err := os.Getwd(); err == nil {
+		addCandidate(filepath.Join(cwd, "web"))
+	}
+
+	if executablePath, err := os.Executable(); err == nil {
+		executableDir := filepath.Dir(executablePath)
+		addCandidate(filepath.Join(executableDir, "web"))
+		addCandidate(filepath.Join(executableDir, "..", "web"))
+	}
+
+	if _, sourceFile, _, ok := runtime.Caller(0); ok {
+		addCandidate(filepath.Join(filepath.Dir(sourceFile), "..", "..", "web"))
+	}
+
+	return candidates
+}
+
+func isWebAssetRoot(path string) bool {
+	if path == "" {
+		return false
+	}
+
+	indexPath := filepath.Join(path, "index.html")
+	jsPath := filepath.Join(path, "js", "alpine.min.js")
+
+	if _, err := os.Stat(indexPath); err != nil {
+		return false
+	}
+
+	if _, err := os.Stat(jsPath); err != nil {
+		return false
+	}
+
+	return true
 }

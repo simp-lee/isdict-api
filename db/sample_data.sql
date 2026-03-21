@@ -10,21 +10,21 @@
 BEGIN;
 
 -- Sample words
-WITH sample_words (headword, headword_normalized, cefr_level, cefr_source, oxford_level, cet_level, frequency_rank, frequency_count, collins_stars, translation_zh) AS (
+WITH sample_words (headword, headword_normalized, cefr_level, cefr_source, oxford_level, cet_level, school_level, frequency_rank, frequency_count, collins_stars, translation_zh) AS (
 	VALUES
-		('hello', 'hello', 1, 'oxford', 1, 0, 234, 125678, 5, '你好；喂'),
-		('world', 'world', 2, 'oxford', 1, 0, 456, 98765, 5, '世界；地球'),
-		('run', 'run', 1, 'oxford', 1, 0, 156, 245678, 5, '跑；运行；经营'),
-		('learn', 'learn', 1, 'oxford', 1, 1, 512, 187654, 5, '学习；学会'),
-		('program', 'program', 2, 'oxford', 1, 0, 789, 76543, 4, '程序；节目'),
-		('go after', 'goafter', 3, 'cefrj', 0, 0, 1234, 5678, 3, '追求；设法得到'),
-		('let go', 'letgo', 2, 'oxford', 0, 0, 2345, 4321, 4, '放手；释放'),
-		('programming', 'programming', 3, 'cefrj', 0, 0, 1567, 34567, 3, '编程；程序设计'),
-		('computer', 'computer', 2, 'oxford', 1, 1, 345, 156789, 5, '计算机；电脑'),
-		('software', 'software', 3, 'oxford', 2, 0, 678, 87654, 4, '软件')
+		('hello', 'hello', 1, 'oxford', 1, 0, 1, 234, 125678, 5, '你好；喂'),
+		('world', 'world', 2, 'oxford', 1, 0, 1, 456, 98765, 5, '世界；地球'),
+		('run', 'run', 1, 'oxford', 1, 0, 1, 156, 245678, 5, '跑；运行；经营'),
+		('learn', 'learn', 1, 'oxford', 1, 1, 2, 512, 187654, 5, '学习；学会'),
+		('program', 'program', 2, 'oxford', 1, 0, 2, 789, 76543, 4, '程序；节目'),
+		('go after', 'goafter', 3, 'cefrj', 0, 0, 3, 1234, 5678, 3, '追求；设法得到'),
+		('let go', 'letgo', 2, 'oxford', 0, 0, 2, 2345, 4321, 4, '放手；释放'),
+		('programming', 'programming', 3, 'cefrj', 0, 0, 3, 1567, 34567, 3, '编程；程序设计'),
+		('computer', 'computer', 2, 'oxford', 1, 1, 2, 345, 156789, 5, '计算机；电脑'),
+		('software', 'software', 3, 'oxford', 2, 0, 3, 678, 87654, 4, '软件')
 )
-INSERT INTO words (headword, headword_normalized, cefr_level, cefr_source, oxford_level, cet_level, frequency_rank, frequency_count, collins_stars, translation_zh)
-SELECT headword, headword_normalized, cefr_level, cefr_source, oxford_level, cet_level, frequency_rank, frequency_count, collins_stars, translation_zh
+INSERT INTO words (headword, headword_normalized, cefr_level, cefr_source, oxford_level, cet_level, school_level, frequency_rank, frequency_count, collins_stars, translation_zh)
+SELECT headword, headword_normalized, cefr_level, cefr_source, oxford_level, cet_level, school_level, frequency_rank, frequency_count, collins_stars, translation_zh
 FROM sample_words;
 
 -- Sample pronunciations
@@ -41,7 +41,7 @@ WITH sample_pronunciations (headword, accent, ipa, is_primary) AS (
 		('program', 1, '/ˈprəʊɡræm/', true),
 		('program', 2, '/ˈproʊɡræm/', true)
 )
-INSERT INTO pronunciations (word_id, accent, ipa, is_primary)
+INSERT INTO pronunciations (word_id, accent, ip_a, is_primary)
 SELECT words.id, sample_pronunciations.accent, sample_pronunciations.ipa, sample_pronunciations.is_primary
 FROM sample_pronunciations
 JOIN words ON words.headword = sample_pronunciations.headword;

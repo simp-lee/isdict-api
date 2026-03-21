@@ -3,14 +3,13 @@ module github.com/simp-lee/isdict-api
 go 1.25.0
 
 require (
-	github.com/DATA-DOG/go-sqlmock v1.5.2
 	github.com/gin-gonic/gin v1.12.0
 	github.com/joho/godotenv v1.5.1
-	github.com/lib/pq v1.11.2
+	github.com/lib/pq v1.12.0
 	github.com/simp-lee/cache v1.1.0
 	github.com/simp-lee/ginx v0.0.0-20260220130432-2c96d21025c6
-	github.com/simp-lee/isdict-commons v0.3.0
-	github.com/simp-lee/isdict-data v0.1.0
+	github.com/simp-lee/isdict-commons v0.4.0
+	github.com/simp-lee/isdict-data v0.1.1
 	github.com/simp-lee/logger v0.0.0-20260217111009-fd322cf2c6f5
 	gorm.io/driver/postgres v1.6.0
 	gorm.io/gorm v1.31.1

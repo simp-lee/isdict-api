@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"database/sql"
-	"database/sql/driver"
 	"encoding/json"
 	"errors"
 	"io"
@@ -14,14 +13,11 @@ import (
 	"path/filepath"
 	"reflect"
 	"strings"
-	"sync"
 	"syscall"
 	"testing"
 	"time"
 
-	"github.com/DATA-DOG/go-sqlmock"
 	"github.com/gin-gonic/gin"
-	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 
 	"github.com/simp-lee/isdict-api/internal/api/middleware"
@@ -204,10 +200,7 @@ func TestRunWithDependencies_FailsWhenRequiredExtensionSetupFails(t *testing.T) 
 	bootstrapLogger := newStubManagedLogger()
 	appLogger := newStubManagedLogger()
 	ensureCalls := 0
-	gormDB, sqlDB := newMockGORMDB(t)
-	t.Cleanup(func() {
-		_ = sqlDB.Close()
-	})
+	gormDB, _ := newDisposablePostgresDatabase(t, "startup_extension_failure", false)
 
 	exitCode := runWithDependencies(
 		func() (*config.Config, error) {
@@ -252,7 +245,7 @@ func TestRunWithDependencies_FailsWhenRequiredExtensionSetupFails(t *testing.T) 
 func TestRunWithDependencies_ClosesDatabaseWhenRequiredExtensionSetupFails(t *testing.T) {
 	bootstrapLogger := newStubManagedLogger()
 	appLogger := newStubManagedLogger()
-	gormDB, mockDB := newMockGORMDB(t)
+	gormDB, sqlDB := newDisposablePostgresDatabase(t, "startup_close_on_extension_failure", false)
 
 	exitCode := runWithDependencies(
 		func() (*config.Config, error) {
@@ -280,23 +273,38 @@ func TestRunWithDependencies_ClosesDatabaseWhenRequiredExtensionSetupFails(t *te
 	if exitCode != 1 {
 		t.Fatalf("runWithDependencies() = %d, want %d", exitCode, 1)
 	}
-	if err := mockDB.Ping(); err == nil || !strings.Contains(err.Error(), "closed") {
+	if err := sqlDB.Ping(); err == nil || !strings.Contains(err.Error(), "closed") {
 		t.Fatalf("database should be closed after extension setup failure, ping error = %v", err)
 	}
 }
 
-func newMockGORMDB(t *testing.T) (*gorm.DB, *sql.DB) {
+func newDisposablePostgresDatabase(t *testing.T, prefix string, migrate bool) (*gorm.DB, *sql.DB) {
 	t.Helper()
 
-	sqlDB, _, err := sqlmock.New()
+	dsn := createAdminOwnedAPITestDatabase(t, prefix)
+	info := mustParsePostgresDSN(t, dsn)
+	gormDB, err := openDatabase(&config.Config{
+		DBHost:     info.Host,
+		DBPort:     info.Port,
+		DBUser:     info.User,
+		DBPassword: info.Password,
+		DBName:     info.Database,
+		DBSSLMode:  info.SSLMode,
+	})
 	if err != nil {
-		t.Fatalf("sqlmock.New() error = %v", err)
+		t.Fatalf("openDatabase() error = %v", err)
 	}
 
-	gormDB, err := gorm.Open(postgres.New(postgres.Config{Conn: sqlDB}), &gorm.Config{DisableAutomaticPing: true})
+	sqlDB, err := gormDB.DB()
 	if err != nil {
+		t.Fatalf("db.DB() error = %v", err)
+	}
+	t.Cleanup(func() {
 		_ = sqlDB.Close()
-		t.Fatalf("gorm.Open() error = %v", err)
+	})
+
+	if migrate {
+		migrateAPITestSchema(t, gormDB)
 	}
 
 	return gormDB, sqlDB
@@ -373,16 +381,15 @@ func TestGracefulShutdown_ReturnsServerError(t *testing.T) {
 
 func TestSetupRouter_LivenessAlwaysReturnsOK(t *testing.T) {
 	tests := []struct {
-		name    string
-		pingErr error
+		name string
 	}{
 		{name: "database available"},
-		{name: "database unavailable", pingErr: errors.New("db unavailable")},
+		{name: "database unavailable"},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			router := setupRouter(nil, &config.Config{}, newPingTestDB(t, tt.pingErr))
+			router := setupRouter(nil, &config.Config{}, nil)
 			recorder := httptest.NewRecorder()
 			request := httptest.NewRequest(http.MethodGet, "/health", nil)
 
@@ -397,7 +404,8 @@ func TestSetupRouter_LivenessAlwaysReturnsOK(t *testing.T) {
 }
 
 func TestSetupRouter_ReadinessReturnsOKWhenDatabaseIsAvailable(t *testing.T) {
-	router := setupRouter(nil, &config.Config{}, newPingTestDB(t, nil))
+	_, sqlDB := newDisposablePostgresDatabase(t, "readiness_ok", true)
+	router := setupRouter(nil, &config.Config{}, sqlDB)
 	recorder := httptest.NewRecorder()
 	request := httptest.NewRequest(http.MethodGet, "/api/v1/health", nil)
 
@@ -410,8 +418,9 @@ func TestSetupRouter_ReadinessReturnsOKWhenDatabaseIsAvailable(t *testing.T) {
 }
 
 func TestSetupRouter_ReadinessReturnsServiceUnavailableWhenRequiredExtensionIsMissing(t *testing.T) {
-	missing := false
-	router := setupRouter(nil, &config.Config{}, newPingTestDBWithBehavior(t, pingTestBehavior{extensionPresent: &missing}))
+	_, sqlDB := newDisposablePostgresDatabase(t, "readiness_missing_extension", false)
+	setPostgresExtensionPresence(t, sqlDB, "pg_trgm", false)
+	router := setupRouter(nil, &config.Config{}, sqlDB)
 	recorder := httptest.NewRecorder()
 	request := httptest.NewRequest(http.MethodGet, "/api/v1/health", nil)
 
@@ -424,7 +433,11 @@ func TestSetupRouter_ReadinessReturnsServiceUnavailableWhenRequiredExtensionIsMi
 }
 
 func TestSetupRouter_ReadinessReturnsServiceUnavailableWhenDatabaseIsUnavailable(t *testing.T) {
-	router := setupRouter(nil, &config.Config{}, newPingTestDB(t, errors.New("db unavailable")))
+	_, sqlDB := newDisposablePostgresDatabase(t, "readiness_closed_db", true)
+	if err := sqlDB.Close(); err != nil {
+		t.Fatalf("sqlDB.Close() error = %v", err)
+	}
+	router := setupRouter(nil, &config.Config{}, sqlDB)
 	recorder := httptest.NewRecorder()
 	request := httptest.NewRequest(http.MethodGet, "/api/v1/health", nil)
 
@@ -436,39 +449,29 @@ func TestSetupRouter_ReadinessReturnsServiceUnavailableWhenDatabaseIsUnavailable
 	})
 }
 
-func TestSetupRouter_ReadinessDoesNotAttemptToEnableRequiredExtension(t *testing.T) {
-	execCalls := 0
-	queryCalls := 0
-	router := setupRouter(nil, &config.Config{}, newPingTestDBWithBehavior(t, pingTestBehavior{
-		onExec: func(string, []driver.NamedValue) {
-			execCalls++
-		},
-		onQuery: func(string, []driver.NamedValue) {
-			queryCalls++
-		},
-	}))
+func TestSetupRouter_ReadinessDoesNotEnableMissingRequiredExtension(t *testing.T) {
+	_, sqlDB := newDisposablePostgresDatabase(t, "readiness_missing_extension_no_enable", false)
+	setPostgresExtensionPresence(t, sqlDB, "pg_trgm", false)
+	assertPostgresExtensionPresence(t, sqlDB, "pg_trgm", false)
+	router := setupRouter(nil, &config.Config{}, sqlDB)
 
 	recorder := httptest.NewRecorder()
 	request := httptest.NewRequest(http.MethodGet, "/api/v1/health", nil)
 	router.ServeHTTP(recorder, request)
 
-	assertHealthResponse(t, recorder, http.StatusOK, map[string]any{
-		"status":  "ok",
+	assertHealthResponse(t, recorder, http.StatusServiceUnavailable, map[string]any{
+		"status":  "not_ready",
 		"service": "isdict-api",
 	})
-	if queryCalls != 1 {
-		t.Fatalf("queryCalls = %d, want 1", queryCalls)
-	}
-	if execCalls != 0 {
-		t.Fatalf("execCalls = %d, want 0", execCalls)
-	}
+	assertPostgresExtensionPresence(t, sqlDB, "pg_trgm", false)
 }
 
 func TestSetupRouter_ReadinessSkipsRateLimiting(t *testing.T) {
 	middleware.CleanupMiddleware()
 	t.Cleanup(middleware.CleanupMiddleware)
 
-	router := setupRouter(nil, newMiddlewareTestConfig(), newPingTestDB(t, nil))
+	_, sqlDB := newDisposablePostgresDatabase(t, "readiness_skips_rate_limit", true)
+	router := setupRouter(nil, newMiddlewareTestConfig(), sqlDB)
 	router.GET("/api/v1/rate-probe", func(c *gin.Context) {
 		c.JSON(http.StatusOK, map[string]any{"status": "ok"})
 	})
@@ -501,12 +504,8 @@ func TestSetupRouter_ReadinessSkipsResponseCaching(t *testing.T) {
 
 	cfg := newMiddlewareTestConfig()
 	cfg.EnableRateLimit = false
-	pingCalls := 0
-	router := setupRouter(nil, cfg, newPingTestDBWithBehavior(t, pingTestBehavior{
-		onPing: func() {
-			pingCalls++
-		},
-	}))
+	_, sqlDB := newDisposablePostgresDatabase(t, "readiness_skips_cache", true)
+	router := setupRouter(nil, cfg, sqlDB)
 	cacheProbeCounter := 0
 	router.GET("/api/v1/cache-probe", func(c *gin.Context) {
 		cacheProbeCounter++
@@ -514,6 +513,9 @@ func TestSetupRouter_ReadinessSkipsResponseCaching(t *testing.T) {
 	})
 
 	firstHealth := performRequest(router, http.MethodGet, "/api/v1/health")
+	if err := sqlDB.Close(); err != nil {
+		t.Fatalf("sqlDB.Close() error = %v", err)
+	}
 	secondHealth := performRequest(router, http.MethodGet, "/api/v1/health")
 	firstProbe := performRequest(router, http.MethodGet, "/api/v1/cache-probe")
 	secondProbe := performRequest(router, http.MethodGet, "/api/v1/cache-probe")
@@ -522,14 +524,10 @@ func TestSetupRouter_ReadinessSkipsResponseCaching(t *testing.T) {
 		"status":  "ok",
 		"service": "isdict-api",
 	})
-	assertHealthResponse(t, secondHealth, http.StatusOK, map[string]any{
-		"status":  "ok",
+	assertHealthResponse(t, secondHealth, http.StatusServiceUnavailable, map[string]any{
+		"status":  "not_ready",
 		"service": "isdict-api",
 	})
-
-	if pingCalls != 2 {
-		t.Fatalf("expected readiness requests to bypass cache and ping DB twice, got %d calls", pingCalls)
-	}
 
 	assertJSONField(t, firstProbe, http.StatusOK, "count", float64(1))
 	assertJSONField(t, secondProbe, http.StatusOK, "count", float64(1))
@@ -542,7 +540,13 @@ func TestSetupRouter_ReadinessUsesConfiguredTimeout(t *testing.T) {
 	delay := 3200 * time.Millisecond
 	cfg := newMiddlewareTestConfig()
 	cfg.TimeoutSeconds = 3
-	router := setupRouter(nil, cfg, newPingTestDBWithBehavior(t, pingTestBehavior{delay: delay}))
+	router := gin.New()
+	router.Use(middleware.SetupMiddleware(cfg))
+	v1 := router.Group("/api/v1")
+	registerReadinessRoute(v1, cfg, nil, func(ctx context.Context, _ *sql.DB) error {
+		<-ctx.Done()
+		return ctx.Err()
+	})
 	router.GET("/api/v1/slow-probe", func(c *gin.Context) {
 		time.Sleep(delay)
 		c.JSON(http.StatusOK, map[string]any{"status": "slow"})
@@ -574,14 +578,15 @@ func TestSetupRouter_ReadinessUsesConfiguredTimeout(t *testing.T) {
 	}
 }
 
-func TestSetupRouter_StaticAssetsExposeOnlyRuntimeFiles(t *testing.T) {
-	repoRoot, err := filepath.Abs(filepath.Join("..", ".."))
-	if err != nil {
-		t.Fatalf("filepath.Abs() error = %v", err)
-	}
-	t.Chdir(repoRoot)
+func TestSetupRouter_StaticAssetsResolveOutsideRepoRootAndExposeOnlyRuntimeFiles(t *testing.T) {
+	t.Chdir(t.TempDir())
 
-	router := setupRouter(nil, &config.Config{}, newPingTestDB(t, nil))
+	router := setupRouter(nil, &config.Config{}, nil)
+
+	index := performRequest(router, http.MethodGet, "/")
+	if index.Code != http.StatusOK {
+		t.Fatalf("index status = %d, want %d", index.Code, http.StatusOK)
+	}
 
 	jsAsset := performRequest(router, http.MethodGet, "/static/js/alpine.min.js")
 	if jsAsset.Code != http.StatusOK {
@@ -676,34 +681,33 @@ func assertErrorEnvelope(t *testing.T, recorder *httptest.ResponseRecorder, want
 	}
 }
 
-func newPingTestDB(t *testing.T, pingErr error) *sql.DB {
-	t.Helper()
-	return newPingTestDBWithBehavior(t, pingTestBehavior{err: pingErr})
-}
-
-func newPingTestDBWithBehavior(t *testing.T, behavior pingTestBehavior) *sql.DB {
+func assertPostgresExtensionPresence(t *testing.T, sqlDB *sql.DB, extensionName string, want bool) {
 	t.Helper()
 
-	driverName := registerPingTestDriver(behavior)
-	db, err := sql.Open(driverName, "")
+	var got bool
+	err := sqlDB.QueryRow(
+		"SELECT EXISTS (SELECT 1 FROM pg_extension WHERE extname = $1)",
+		extensionName,
+	).Scan(&got)
 	if err != nil {
-		t.Fatalf("open test db: %v", err)
+		t.Fatalf("QueryRow() error = %v", err)
 	}
-	t.Cleanup(func() {
-		_ = db.Close()
-	})
-
-	return db
+	if got != want {
+		t.Fatalf("extension %q present = %v, want %v", extensionName, got, want)
+	}
 }
 
-func registerPingTestDriver(behavior pingTestBehavior) string {
-	pingTestDriverRegistry.mu.Lock()
-	defer pingTestDriverRegistry.mu.Unlock()
+func setPostgresExtensionPresence(t *testing.T, sqlDB *sql.DB, extensionName string, want bool) {
+	t.Helper()
 
-	pingTestDriverRegistry.counter++
-	name := pingTestDriverName(pingTestDriverRegistry.counter)
-	sql.Register(name, pingTestDriver{behavior: behavior})
-	return name
+	statement := "DROP EXTENSION IF EXISTS " + quoteIdentifier(extensionName)
+	if want {
+		statement = "CREATE EXTENSION IF NOT EXISTS " + quoteIdentifier(extensionName)
+	}
+
+	if _, err := sqlDB.Exec(statement); err != nil {
+		t.Fatalf("sqlDB.Exec(%q) error = %v", statement, err)
+	}
 }
 
 func newMiddlewareTestConfig() *config.Config {
@@ -725,19 +729,6 @@ func performRequest(router http.Handler, method, path string) *httptest.Response
 	request := httptest.NewRequest(method, path, nil)
 	router.ServeHTTP(recorder, request)
 	return recorder
-}
-
-func pingTestDriverName(index int) string {
-	return "ping-test-driver-" + string(rune('a'+index-1))
-}
-
-var pingTestDriverRegistry struct {
-	mu      sync.Mutex
-	counter int
-}
-
-type pingTestDriver struct {
-	behavior pingTestBehavior
 }
 
 type shutdownServerFunc func(context.Context) error
@@ -789,107 +780,5 @@ func (l *stubManagedLogger) Sync() error {
 
 func (l *stubManagedLogger) Close() error {
 	l.closeCalls++
-	return nil
-}
-
-func (d pingTestDriver) Open(string) (driver.Conn, error) {
-	return pingTestConn(d), nil
-}
-
-type pingTestConn struct {
-	behavior pingTestBehavior
-}
-
-type pingTestBehavior struct {
-	err              error
-	delay            time.Duration
-	queryErr         error
-	queryDelay       time.Duration
-	onPing           func()
-	onQuery          func(string, []driver.NamedValue)
-	onExec           func(string, []driver.NamedValue)
-	extensionPresent *bool
-}
-
-func (c pingTestConn) Prepare(string) (driver.Stmt, error) {
-	return nil, errors.New("not implemented")
-}
-
-func (c pingTestConn) Close() error {
-	return nil
-}
-
-func (c pingTestConn) Begin() (driver.Tx, error) {
-	return nil, errors.New("not implemented")
-}
-
-func (c pingTestConn) Ping(ctx context.Context) error {
-	if c.behavior.onPing != nil {
-		c.behavior.onPing()
-	}
-
-	if c.behavior.delay > 0 {
-		select {
-		case <-time.After(c.behavior.delay):
-		case <-ctx.Done():
-			return ctx.Err()
-		}
-	}
-
-	return c.behavior.err
-}
-
-func (c pingTestConn) QueryContext(ctx context.Context, query string, args []driver.NamedValue) (driver.Rows, error) {
-	if c.behavior.onQuery != nil {
-		c.behavior.onQuery(query, args)
-	}
-
-	if c.behavior.queryDelay > 0 {
-		select {
-		case <-time.After(c.behavior.queryDelay):
-		case <-ctx.Done():
-			return nil, ctx.Err()
-		}
-	}
-
-	if c.behavior.queryErr != nil {
-		return nil, c.behavior.queryErr
-	}
-
-	present := true
-	if c.behavior.extensionPresent != nil {
-		present = *c.behavior.extensionPresent
-	}
-
-	return &pingTestRows{value: present}, nil
-}
-
-func (c pingTestConn) ExecContext(context.Context, string, []driver.NamedValue) (driver.Result, error) {
-	if c.behavior.onExec != nil {
-		c.behavior.onExec("", nil)
-	}
-	return driver.RowsAffected(0), nil
-}
-
-type pingTestRows struct {
-	yielded bool
-	value   bool
-}
-
-func (r *pingTestRows) Columns() []string {
-	return []string{"exists"}
-}
-
-func (r *pingTestRows) Close() error {
-	return nil
-}
-
-func (r *pingTestRows) Next(dest []driver.Value) error {
-	if r.yielded {
-		return io.EOF
-	}
-
-	r.yielded = true
-	dest[0] = r.value
 	return nil
 }

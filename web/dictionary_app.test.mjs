@@ -149,6 +149,11 @@ function createHarness(options = {}) {
         pathname: options.pathname || '/',
         search: options.search || ''
     };
+    const navigatorObject = options.navigator || {
+        clipboard: {
+            async writeText() {}
+        }
+    };
 
     const windowObject = {
         innerWidth: 1280,
@@ -174,6 +179,7 @@ function createHarness(options = {}) {
         setTimeout(callback, delay) {
             return timers.setTimeout(callback, delay);
         },
+        navigator: navigatorObject,
         window: windowObject,
         fetch: async (url, options = {}) => {
             fetchCalls.push(url);
@@ -550,6 +556,29 @@ test('API endpoint counts are derived from a single catalog source', () => {
     assert.equal(app.apiEndpointCatalog.health.length, 2);
     assert.equal(app.apiBusinessEndpointCount, app.apiEndpointCatalog.business.length);
     assert.equal(app.apiHealthEndpointCount, app.apiEndpointCatalog.health.length);
+});
+
+test('copyText delegates to navigator.clipboard.writeText', async () => {
+    const clipboardCalls = [];
+    const { app } = createHarness({
+        navigator: {
+            clipboard: {
+                async writeText(text) {
+                    clipboardCalls.push(text);
+                }
+            }
+        }
+    });
+
+    await app.copyText(app.batchRequestCopyText);
+
+    assert.deepEqual(clipboardCalls, [app.batchRequestCopyText]);
+    assert.match(app.batchRequestCopyText, /"include_pronunciations":true/);
+});
+
+test('batch request copy button no longer embeds raw JSON in Alpine expression', () => {
+    assert.match(htmlSource, /@click="copyText\(batchRequestCopyText\)"/);
+    assert.doesNotMatch(htmlSource, /navigator\.clipboard\.writeText\('\{\\"words\\"/);
 });
 
 test('phrase contract keeps 400 validation separate from not-found misses', async () => {

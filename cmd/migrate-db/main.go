@@ -18,35 +18,8 @@ import (
 )
 
 const verifyScopeDescription = "migration-managed tables and indexes tracked by isdict-commons"
-const advisoryVerifyScopeDescription = "reference SQL snapshot"
 const requiredExtensionName = postgresutil.RequiredExtensionName
 const dropConfirmationExampleTarget = "postgres@db.example.com:5432/isdict"
-
-var baseReferenceIndexes = []string{
-	"idx_pronunciation_primary_unique",
-	"idx_word_variant_unique",
-	"idx_words_headword_normalized",
-	"idx_words_cefr_level",
-	"idx_words_cet_level",
-	"idx_words_oxford_level",
-	"idx_words_school_level",
-	"idx_words_frequency_rank",
-	"idx_words_collins_stars",
-	"idx_pronunciations_word_id",
-	"idx_senses_word_id",
-	"idx_examples_sense_id",
-	"idx_word_variants_variant_text",
-	"idx_word_variants_headword_normalized",
-	"idx_word_variants_word_id",
-	"idx_word_variants_frequency_rank",
-}
-
-var trigramReferenceIndexes = []string{
-	"idx_words_headword_trgm",
-	"idx_words_phrase_lower_trgm",
-	"idx_word_variants_headword_trgm",
-	"idx_word_variants_phrase_lower_trgm",
-}
 
 // migrate-db is a standalone tool for database migration
 // Usage: go run cmd/migrate-db/main.go [--drop] [--verify]
@@ -77,7 +50,6 @@ func runWithArgs(args []string, stdout io.Writer, stderr io.Writer) int {
 		func(db *gorm.DB) migrationRunner { return migration.NewMigrator(db) },
 		ensureRequiredExtensionsEnabled,
 		verifyRequiredExtensionPresent,
-		verifyRequiredReferenceIndexes,
 	)
 }
 
@@ -102,7 +74,6 @@ func runWithDependencies(
 	newMigrator func(*gorm.DB) migrationRunner,
 	ensureRequiredExtensions func(*gorm.DB) error,
 	verifyRequiredExtension func(*gorm.DB) error,
-	verifyIndexes func(*gorm.DB) error,
 ) int {
 	opts, exitCode, stop := parseArgs(args, stdout, stderr)
 	if stop {
@@ -153,9 +124,9 @@ func runWithDependencies(
 
 	migrator := newMigrator(database.db)
 	if opts.verifyOnly {
-		return runVerificationMode(log, database.db, migrator, verifyRequiredExtension, verifyIndexes)
+		return runVerificationMode(log, database.db, migrator, verifyRequiredExtension)
 	}
-	return runMigrationMode(log, database.db, migrator, opts, ensureRequiredExtensions, verifyIndexes)
+	return runMigrationMode(log, database.db, migrator, opts, ensureRequiredExtensions)
 }
 
 func initializeBootstrapLogger(newBootstrapLogger func() (applog.ManagedLogger, error), stderr io.Writer) (applog.ManagedLogger, func(), error) {
@@ -195,7 +166,7 @@ func closeDatabaseHandle(log *slog.Logger, database *databaseHandle) {
 	}
 }
 
-func runVerificationMode(log *slog.Logger, db *gorm.DB, migrator migrationRunner, verifyRequiredExtension func(*gorm.DB) error, verifyIndexes func(*gorm.DB) error) int {
+func runVerificationMode(log *slog.Logger, db *gorm.DB, migrator migrationRunner, verifyRequiredExtension func(*gorm.DB) error) int {
 	if err := verifyRequiredExtension(db); err != nil {
 		log.Error("required extension verification failed", "error", err, "scope", verifyScopeDescription)
 		return 1
@@ -212,11 +183,11 @@ func runVerificationMode(log *slog.Logger, db *gorm.DB, migrator migrationRunner
 		log.Error("core migration verification did not satisfy success criteria", "error", err, "scope", verifyScopeDescription)
 		return 1
 	}
-	reportVerificationAdvisories(log, status, db, verifyIndexes)
+	reportVerificationAdvisories(log, status)
 	return 0
 }
 
-func runMigrationMode(log *slog.Logger, db *gorm.DB, migrator migrationRunner, opts runOptions, ensureRequiredExtensions func(*gorm.DB) error, verifyIndexes func(*gorm.DB) error) int {
+func runMigrationMode(log *slog.Logger, db *gorm.DB, migrator migrationRunner, opts runOptions, ensureRequiredExtensions func(*gorm.DB) error) int {
 	if err := ensureRequiredExtensions(db); err != nil {
 		log.Error("required extension setup failed", "error", err, "scope", verifyScopeDescription)
 		return 1
@@ -239,7 +210,7 @@ func runMigrationMode(log *slog.Logger, db *gorm.DB, migrator migrationRunner, o
 		log.Error("post-migration verification did not satisfy success criteria", "error", err, "scope", verifyScopeDescription)
 		return 1
 	}
-	reportVerificationAdvisories(log, status, db, verifyIndexes)
+	reportVerificationAdvisories(log, status)
 	log.Info("database migration completed successfully")
 	return 0
 }
@@ -263,24 +234,12 @@ func requireSuccessfulVerification(status *migration.MigrationStatus) error {
 	return nil
 }
 
-func reportVerificationAdvisories(log *slog.Logger, status *migration.MigrationStatus, db *gorm.DB, verifyIndexes func(*gorm.DB) error) {
+func reportVerificationAdvisories(log *slog.Logger, status *migration.MigrationStatus) {
 	if status != nil && status.HasIssues() {
 		log.Warn("migration verification reported advisory integrity issues",
 			"issues", status.Issues,
 			"impact", "commons verification remains authoritative; generic issues are advisory unless migration-managed objects are incomplete",
 			"scope", verifyScopeDescription,
-		)
-	}
-
-	if verifyIndexes == nil {
-		return
-	}
-
-	if err := verifyIndexes(db); err != nil {
-		log.Warn("reference SQL snapshot differs from database",
-			"error", err,
-			"impact", "db/*.sql remains reference-only; isdict-commons migration is the authoritative success criterion",
-			"scope", advisoryVerifyScopeDescription,
 		)
 	}
 }
@@ -300,74 +259,6 @@ func verifyRequiredExtensionPresent(db *gorm.DB) error {
 	}
 
 	return postgresutil.CheckRequiredExtensionPresent(context.Background(), sqlDB)
-}
-
-func verifyRequiredReferenceIndexes(db *gorm.DB) error {
-	if db == nil {
-		return fmt.Errorf("database handle is nil")
-	}
-
-	indexNames, err := listPublicIndexNames(db)
-	if err != nil {
-		return fmt.Errorf("list public indexes: %w", err)
-	}
-
-	missing := missingRequiredIndexes(indexNames, requiredReferenceIndexes())
-	if len(missing) > 0 {
-		return fmt.Errorf("missing required reference indexes: %s", strings.Join(missing, ", "))
-	}
-
-	return nil
-}
-
-func requiredReferenceIndexes() []string {
-	required := append([]string{}, baseReferenceIndexes...)
-	return append(required, trigramReferenceIndexes...)
-}
-
-func listPublicIndexNames(db *gorm.DB) ([]string, error) {
-	rows, err := db.Raw("SELECT indexname FROM pg_indexes WHERE schemaname = current_schema()").Rows()
-	if err != nil {
-		return nil, err
-	}
-	defer func() {
-		if closeErr := rows.Close(); closeErr != nil && err == nil {
-			err = closeErr
-		}
-	}()
-
-	indexNames := make([]string, 0, len(baseReferenceIndexes)+len(trigramReferenceIndexes))
-	for rows.Next() {
-		var indexName string
-		if err := rows.Scan(&indexName); err != nil {
-			return nil, err
-		}
-		indexNames = append(indexNames, indexName)
-	}
-
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-
-	return indexNames, nil
-}
-
-func missingRequiredIndexes(existing []string, required []string) []string {
-	existingSet := make(map[string]struct{}, len(existing))
-	for _, name := range existing {
-		existingSet[strings.ToLower(strings.TrimSpace(name))] = struct{}{}
-	}
-
-	missing := make([]string, 0)
-	for _, name := range required {
-		normalized := strings.ToLower(strings.TrimSpace(name))
-		if _, ok := existingSet[normalized]; ok {
-			continue
-		}
-		missing = append(missing, name)
-	}
-
-	return missing
 }
 
 func openDatabase(cfg *config.Config) (*databaseHandle, error) {
@@ -496,5 +387,5 @@ func printUsage(w io.Writer) {
 	_, _ = fmt.Fprintln(w, "  go run cmd/migrate-db/main.go --verify")
 	_, _ = fmt.Fprintln(w)
 	_, _ = fmt.Fprintln(w, "Note: For SQL schema export, use pg_dump:")
-	_, _ = fmt.Fprintln(w, "  pg_dump -h db.example.com -U postgres -d isdict --schema-only > schema.sql")
+	_, _ = fmt.Fprintln(w, "  pg_dump -h db.example.com -U postgres -d isdict --schema-only > /tmp/isdict-schema.sql")
 }

@@ -17,8 +17,10 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/simp-lee/isdict-api/internal/api/handler"
 	"github.com/simp-lee/isdict-api/internal/config"
+	"github.com/simp-lee/isdict-commons/migration"
 	commonmodel "github.com/simp-lee/isdict-commons/model"
 	"github.com/simp-lee/isdict-commons/textutil"
+	"github.com/simp-lee/isdict-data/postgresutil"
 	"github.com/simp-lee/isdict-data/repository"
 	"github.com/simp-lee/isdict-data/service"
 	pgdriver "gorm.io/driver/postgres"
@@ -81,6 +83,9 @@ func TestAPIGetWord_PostgresIntegration(t *testing.T) {
 	}
 	if resp.Data.CEFRLevel != "A1" {
 		t.Fatalf("cefr_level = %q, want %q", resp.Data.CEFRLevel, "A1")
+	}
+	if resp.Data.SchoolLevel != 1 {
+		t.Fatalf("school_level = %d, want %d", resp.Data.SchoolLevel, 1)
 	}
 }
 
@@ -160,6 +165,9 @@ func TestAPISearchWords_PostgresAppliesFilters(t *testing.T) {
 	}
 	if resp.Data[0].CEFRLevel != "A2" {
 		t.Fatalf("cefr_level = %q, want %q", resp.Data[0].CEFRLevel, "A2")
+	}
+	if resp.Data[0].SchoolLevel != 2 {
+		t.Fatalf("school_level = %d, want %d", resp.Data[0].SchoolLevel, 2)
 	}
 	if !reflectStringSlice(resp.Data[0].POS, []string{"noun"}) {
 		t.Fatalf("pos = %v, want [noun]", resp.Data[0].POS)
@@ -612,13 +620,8 @@ func newAPIPostgresHarness(tb testing.TB, seed func(testing.TB, *sql.DB)) *apiPo
 	}
 	tb.Cleanup(func() { _ = sqlDB.Close() })
 
-	for _, path := range []string{
-		filepath.Join("..", "..", "db", "schema.sql"),
-		filepath.Join("..", "..", "db", "indexes.sql"),
-		filepath.Join("..", "..", "db", "sample_data.sql"),
-	} {
-		executeSQLFileTB(tb, sqlDB, path)
-	}
+	migrateAPITestSchema(tb, db)
+	executeSQLFileTB(tb, sqlDB, filepath.Join("..", "..", "db", "sample_data.sql"))
 
 	if seed != nil {
 		seed(tb, sqlDB)
@@ -661,6 +664,7 @@ func seedTriSearchFixtures(tb testing.TB, sqlDB *sql.DB) {
 		cefrLevel     int
 		cetLevel      int
 		oxfordLevel   int
+		schoolLevel   int
 		frequencyRank int
 		collinsStars  int
 		translationZH string
@@ -668,14 +672,14 @@ func seedTriSearchFixtures(tb testing.TB, sqlDB *sql.DB) {
 		definitionEN  string
 		definitionZH  string
 	}{
-		{"trimark", 2, 1, 1, 30, 5, "三重标记", 1, "a triple mark", "三重标记"},
-		{"trident", 2, 1, 1, 40, 4, "三叉戟", 1, "a three-pronged spear", "三叉戟"},
-		{"triage", 4, 1, 2, 20, 5, "分诊", 1, "medical sorting", "分诊"},
-		{"trigger", 2, 2, 1, 10, 5, "触发", 2, "to cause something", "触发"},
+		{"trimark", 2, 1, 1, 2, 30, 5, "三重标记", 1, "a triple mark", "三重标记"},
+		{"trident", 2, 1, 1, 1, 40, 4, "三叉戟", 1, "a three-pronged spear", "三叉戟"},
+		{"triage", 4, 1, 2, 3, 20, 5, "分诊", 1, "medical sorting", "分诊"},
+		{"trigger", 2, 2, 1, 2, 10, 5, "触发", 2, "to cause something", "触发"},
 	}
 
 	for _, fixture := range fixtures {
-		wordID := insertWord(tb, sqlDB, fixture.headword, fixture.cefrLevel, fixture.cetLevel, fixture.oxfordLevel, fixture.frequencyRank, fixture.collinsStars, fixture.translationZH)
+		wordID := insertWordWithSchoolLevel(tb, sqlDB, fixture.headword, fixture.cefrLevel, fixture.cetLevel, fixture.oxfordLevel, fixture.schoolLevel, fixture.frequencyRank, fixture.collinsStars, fixture.translationZH)
 		insertSense(tb, sqlDB, wordID, fixture.pos, fixture.definitionEN, fixture.definitionZH, 1, fixture.cefrLevel, "oxford", fixture.oxfordLevel)
 	}
 }
@@ -843,18 +847,23 @@ func seedBenchmarkPhraseFixtures(tb testing.TB, sqlDB *sql.DB, count int) {
 }
 
 func insertWord(tb testing.TB, sqlDB *sql.DB, headword string, cefrLevel, cetLevel, oxfordLevel, frequencyRank, collinsStars int, translationZH string) int64 {
+	return insertWordWithSchoolLevel(tb, sqlDB, headword, cefrLevel, cetLevel, oxfordLevel, 0, frequencyRank, collinsStars, translationZH)
+}
+
+func insertWordWithSchoolLevel(tb testing.TB, sqlDB *sql.DB, headword string, cefrLevel, cetLevel, oxfordLevel, schoolLevel, frequencyRank, collinsStars int, translationZH string) int64 {
 	tb.Helper()
 
 	var wordID int64
 	err := sqlDB.QueryRow(
-		`INSERT INTO words (headword, headword_normalized, cefr_level, cefr_source, cet_level, oxford_level, frequency_rank, frequency_count, collins_stars, translation_zh)
-		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) RETURNING id`,
+		`INSERT INTO words (headword, headword_normalized, cefr_level, cefr_source, cet_level, oxford_level, school_level, frequency_rank, frequency_count, collins_stars, translation_zh)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11) RETURNING id`,
 		headword,
 		textutil.ToNormalized(headword),
 		cefrLevel,
 		"oxford",
 		cetLevel,
 		oxfordLevel,
+		schoolLevel,
 		frequencyRank,
 		1000-frequencyRank,
 		collinsStars,
@@ -1176,6 +1185,27 @@ func createAdminOwnedAPITestDatabase(tb testing.TB, prefix string) string {
 	})
 
 	return buildPostgresDSN(adminInfo, databaseName, "", "")
+}
+
+func migrateAPITestSchema(tb testing.TB, db *gorm.DB) {
+	tb.Helper()
+
+	if err := postgresutil.EnsureRequiredExtensionsEnabled(db); err != nil {
+		tb.Fatalf("EnsureRequiredExtensionsEnabled() error = %v", err)
+	}
+
+	migrator := migration.NewMigrator(db)
+	if err := migrator.Migrate(&migration.MigrateOptions{}); err != nil {
+		tb.Fatalf("migrator.Migrate() error = %v", err)
+	}
+
+	status, err := migrator.VerifyMigration(nil, nil)
+	if err != nil {
+		tb.Fatalf("migrator.VerifyMigration() error = %v", err)
+	}
+	if status == nil || !status.IsComplete() {
+		tb.Fatalf("migration verification incomplete: %+v", status)
+	}
 }
 
 func requireAPIPostgresAdminDSN(tb testing.TB) string {
